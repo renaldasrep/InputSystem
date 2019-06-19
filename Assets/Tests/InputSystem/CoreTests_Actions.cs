@@ -5819,6 +5819,7 @@ partial class CoreTests
         {
             trace.SubscribeToAll();
 
+            // Begin primary touch.
             BeginTouch(1, new Vector2(0.123f, 0.234f));
 
             Assert.That(trace,
@@ -5831,6 +5832,7 @@ partial class CoreTests
 
             trace.Clear();
 
+            // Begin secondary touch.
             BeginTouch(2, new Vector2(0.234f, 0.345f));
 
             Assert.That(trace,
@@ -5839,15 +5841,17 @@ partial class CoreTests
 
             trace.Clear();
 
+            // End primary touch.
             EndTouch(1, new Vector2(0.345f, 0.456f));
 
             Assert.That(trace,
-                Performed(primaryTouchAction, touchscreen.primaryTouch.position, new Vector2(0.234f, 0.345f)) // Switched to touch #1.
-                    .AndThen(Performed(positionAction, touchscreen.position, new Vector2(0.234f, 0.345f)))
+                Performed(primaryTouchAction, touchscreen.primaryTouch.position, new Vector2(0.345f, 0.456f))
+                    .AndThen(Performed(positionAction, touchscreen.position, new Vector2(0.345f, 0.456f)))
                     .AndThen(Performed(touch0Action, touchscreen.touches[0].position, new Vector2(0.345f, 0.456f))));
 
             trace.Clear();
 
+            // End secondary touch.
             EndTouch(2, new Vector2(0.234f, 0.345f));
 
             Assert.That(trace, Is.Empty);

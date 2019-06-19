@@ -560,10 +560,7 @@ internal class UITests : InputTestFixture
         [InputControl(name = "select", layout = "Button", offset = 28, sizeInBits = 8)]
         public byte select;
 
-        public FourCC format
-        {
-            get { return new FourCC('T', 'E', 'S', 'T'); }
-        }
+        public FourCC format => new FourCC('T', 'E', 'S', 'T');
     }
 
     [InputControlLayout(stateType = typeof(TestTrackedDeviceLayout))]
@@ -718,10 +715,7 @@ internal class UITests : InputTestFixture
         [InputControl(name = "touch", layout = "Touch")]
         public TouchState touch;
 
-        public FourCC format
-        {
-            get { return new FourCC('T', 'T', 'L', ' '); }
-        }
+        public FourCC format => new FourCC('T', 'T', 'L', ' ');
     }
 
     [InputControlLayout(stateType = typeof(TestTouchLayout))]

@@ -19,14 +19,6 @@ using UnityEngine.Profiling;
 
 ////REVIEW: where should we put handset vibration support? should that sit on the touchscreen class? be its own separate device?
 
-// What I want:
-// X There should always be a reliable "primary" touch
-// X Touch #0..#n should always correspond to first..last touch
-// - Reliable binding from actions
-// X TouchManager should make tracking touches super easy
-// - Lots of tests to cover all this
-// - Ideally, make touch not depend on hardcoded state format
-
 namespace UnityEngine.InputSystem.LowLevel
 {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1028:EnumStorageShouldBeInt32", Justification = "byte to correspond to TouchState layout.")]
@@ -39,10 +31,10 @@ namespace UnityEngine.InputSystem.LowLevel
         PrimaryTouch = 1 << 4,
         Tap = 1 << 5,
 
-        // We use this flag internally to detect the case where the primary touch switches from
-        // one finger to another. In this case, we don't want to trigger a release to trigger
-        // a tap.
-        InheritedPrimaryTouch = 1 << 6,
+        // Indicates that the touch that established this primary touch has ended but that when
+        // it did, there were still other touches going on. We end the primary touch when the
+        // last touch leaves the screen.
+        OrphanedPrimaryTouch = 1 << 6,
     }
 
     // IMPORTANT: Must match TouchInputState in native code.
@@ -170,18 +162,15 @@ namespace UnityEngine.InputSystem.LowLevel
             }
         }
 
-        /// <summary>
-        /// Whether this touch has taken over as primary from another touch.
-        /// </summary>
-        public bool isInheritedPrimaryTouch
+        internal bool isOrphanedPrimaryTouch
         {
-            get => (flags & (byte)TouchFlags.InheritedPrimaryTouch) != 0;
+            get => (flags & (byte)TouchFlags.OrphanedPrimaryTouch) != 0;
             set
             {
                 if (value)
-                    flags |= (byte)TouchFlags.InheritedPrimaryTouch;
+                    flags |= (byte)TouchFlags.OrphanedPrimaryTouch;
                 else
-                    flags &= (byte)~TouchFlags.InheritedPrimaryTouch;
+                    flags &= (byte)~TouchFlags.OrphanedPrimaryTouch;
             }
         }
 
@@ -462,14 +451,14 @@ namespace UnityEngine.InputSystem
                 //       since we know the maximum time that a tap can take, we have a reasonable estimate for when a prior
                 //       tap must have ended.
                 if (touchStatePtr->tapCount > 0 && InputState.currentTime >= touchStatePtr->startTime + s_TapTime + s_TapDelayTime)
-                    InputState.Change(touches[i].tapCount, 0);
+                    InputState.Change(touches[i].tapCount, (byte)0);
             }
 
             var primaryTouchState = (TouchState*)((byte*)statePtr + stateBlock.byteOffset);
             if (primaryTouchState->delta != default)
                 InputState.Change(primaryTouch.delta, Vector2.zero);
             if (primaryTouchState->tapCount > 0 && InputState.currentTime >= primaryTouchState->startTime + s_TapTime + s_TapDelayTime)
-                InputState.Change(primaryTouch.tapCount, 0);
+                InputState.Change(primaryTouch.tapCount, (byte)0);
 
             Profiler.EndSample();
         }
@@ -526,9 +515,7 @@ namespace UnityEngine.InputSystem
                     {
                         // Preserve primary touch state.
                         var isPrimaryTouch = currentTouchState[i].isPrimaryTouch;
-                        var isInheritedPrimaryTouch = currentTouchState[i].isInheritedPrimaryTouch;
                         newTouchState.isPrimaryTouch = isPrimaryTouch;
-                        newTouchState.isInheritedPrimaryTouch = isInheritedPrimaryTouch;
 
                         // Compute delta if touch doesn't have one.
                         if (newTouchState.delta == default)
@@ -561,11 +548,9 @@ namespace UnityEngine.InputSystem
                                 ////REVIEW: also reset tapCounts here when tap delay time has expired on the touch?
 
                                 newTouchState.isPrimaryTouch = false;
-                                newTouchState.isInheritedPrimaryTouch = false;
 
-                                // Primary touch was ended. See if we have another ongoing touch that can take
-                                // over.
-                                var haveNewPrimaryTouch = false;
+                                // Primary touch was ended. See if there are still other ongoing touches.
+                                var haveOngoingTouch = false;
                                 for (var n = 0; n < touchControlCount; ++n)
                                 {
                                     if (n == i)
@@ -573,31 +558,45 @@ namespace UnityEngine.InputSystem
 
                                     if (currentTouchState[n].isInProgress)
                                     {
-                                        ////REVIEW: change timing on touch
-                                        var newPrimaryTouch = *(currentTouchState + n);
-                                        newPrimaryTouch.isPrimaryTouch = true;
-                                        newPrimaryTouch.isInheritedPrimaryTouch = true;
-                                        InputState.Change(touches[n], newPrimaryTouch, eventPtr: eventPtr);
-                                        newPrimaryTouch.phase = TouchPhase.Moved;
-                                        InputState.Change(primaryTouch, newPrimaryTouch, eventPtr: eventPtr);
-                                        haveNewPrimaryTouch = true;
+                                        haveOngoingTouch = true;
                                         break;
                                     }
                                 }
 
-                                if (!haveNewPrimaryTouch)
+                                if (!haveOngoingTouch)
                                 {
-                                    // Tap on primary touch is only triggered if the touch never switched fingers.
-                                    if (isTap && !isInheritedPrimaryTouch)
+                                    // No, primary was the only ongoing touch. End it.
+
+                                    if (isTap)
                                         TriggerTap(primaryTouch, ref newTouchState, eventPtr);
                                     else
                                         InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
+                                }
+                                else
+                                {
+                                    // Yes, we have other touches going on. Orphan the primary touch
+                                    // and
+
+                                    var newPrimaryTouchState = newTouchState;
+                                    newPrimaryTouchState.phase = TouchPhase.Moved;
+                                    newPrimaryTouchState.isOrphanedPrimaryTouch = true;
+                                    InputState.Change(primaryTouch, newPrimaryTouchState, eventPtr: eventPtr);
                                 }
                             }
                             else
                             {
                                 // Primary touch was updated.
                                 InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
+                            }
+                        }
+                        else
+                        {
+                            // If it's not the primary touch but the touch has ended, see if we have an
+                            // orphaned primary touch. If so, end it now.
+                            if (newTouchState.isNoneEndedOrCanceled && primaryTouchState->isOrphanedPrimaryTouch)
+                            {
+                                primaryTouchState->isOrphanedPrimaryTouch = false;
+                                InputState.Change(primaryTouch.phase, (byte)TouchPhase.Ended);
                             }
                         }
 
@@ -648,7 +647,6 @@ namespace UnityEngine.InputSystem
                     if (primaryTouchState->isNoneEndedOrCanceled)
                     {
                         newTouchState.isPrimaryTouch = true;
-                        newTouchState.isInheritedPrimaryTouch = false;
                         InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
                     }
 

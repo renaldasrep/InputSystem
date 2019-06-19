@@ -2229,6 +2229,9 @@ partial class CoreTests
 
     // This test makes sure that Touchscreen correctly synthesizes primaryTouch in a way that makes the controls
     // inherited from Pointer operate in a fashion equivalent to other types of pointers.
+    //
+    // NOTE: The behavior here where primary touch stays ongoing and in place for as long as there is any other
+    //       active touch on the screen seems consistent with observed behavior on iOS and Android.
     [Test]
     [Category("Devices")]
     public void Devices_CanUseTouchscreenAsPointer()
@@ -2273,28 +2276,39 @@ partial class CoreTests
         Assert.That(device.press.wasPressedThisFrame, Is.False);
         Assert.That(device.press.wasReleasedThisFrame, Is.False);
 
-        // First finger goes up. Second finger becomes primary.
+        // First finger goes up. Primary touch moves to final position but does NOT
+        // end yet.
         EndTouch(4, new Vector2(0.345f, 0.456f), time: 0.3);
 
-        Assert.That(device.pointerId.ReadValue(), Is.EqualTo(5));
-        Assert.That(device.position.x.ReadValue(), Is.EqualTo(0.111).Within(0.000001));
-        Assert.That(device.position.y.ReadValue(), Is.EqualTo(0.222).Within(0.000001));
-        // NO activity on delta when switching from one finger to another even when the
-        // screen position of primaryAction jumps.
+        Assert.That(device.pointerId.ReadValue(), Is.EqualTo(4));
+        Assert.That(device.position.x.ReadValue(), Is.EqualTo(0.345).Within(0.000001));
+        Assert.That(device.position.y.ReadValue(), Is.EqualTo(0.456).Within(0.000001));
+        Assert.That(device.delta.x.ReadValue(), Is.EqualTo(0.111).Within(0.000001));
+        Assert.That(device.delta.y.ReadValue(), Is.EqualTo(0.111).Within(0.000001));
+        Assert.That(device.press.isPressed, Is.True);
+        Assert.That(device.press.wasPressedThisFrame, Is.False);
+        Assert.That(device.press.wasReleasedThisFrame, Is.False);
+
+        // Second finger moves. No effect on primary touch.
+        MoveTouch(5, new Vector2(0.456f, 0.567f), time: 0.4);
+
+        Assert.That(device.pointerId.ReadValue(), Is.EqualTo(4));
+        Assert.That(device.position.x.ReadValue(), Is.EqualTo(0.345).Within(0.000001));
+        Assert.That(device.position.y.ReadValue(), Is.EqualTo(0.456).Within(0.000001));
         Assert.That(device.delta.x.ReadValue(), Is.Zero.Within(0.000001));
         Assert.That(device.delta.y.ReadValue(), Is.Zero.Within(0.000001));
         Assert.That(device.press.isPressed, Is.True);
         Assert.That(device.press.wasPressedThisFrame, Is.False);
         Assert.That(device.press.wasReleasedThisFrame, Is.False);
 
-        // Second finger goes up.
+        // Second finger goes up. Primary touch now ends.
         EndTouch(5, new Vector2(0.777f, 0.888f), time: 0.4);
 
-        Assert.That(device.pointerId.ReadValue(), Is.EqualTo(5));
-        Assert.That(device.position.x.ReadValue(), Is.EqualTo(0.777).Within(0.000001));
-        Assert.That(device.position.y.ReadValue(), Is.EqualTo(0.888).Within(0.000001));
-        Assert.That(device.delta.x.ReadValue(), Is.EqualTo(0.666).Within(0.000001));
-        Assert.That(device.delta.y.ReadValue(), Is.EqualTo(0.666).Within(0.000001));
+        Assert.That(device.pointerId.ReadValue(), Is.EqualTo(4));
+        Assert.That(device.position.x.ReadValue(), Is.EqualTo(0.345).Within(0.000001));
+        Assert.That(device.position.y.ReadValue(), Is.EqualTo(0.456).Within(0.000001));
+        Assert.That(device.delta.x.ReadValue(), Is.Zero.Within(0.000001));
+        Assert.That(device.delta.y.ReadValue(), Is.Zero.Within(0.000001));
         Assert.That(device.press.isPressed, Is.False);
         Assert.That(device.press.wasPressedThisFrame, Is.False);
         Assert.That(device.press.wasReleasedThisFrame, Is.True);
