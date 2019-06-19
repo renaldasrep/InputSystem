@@ -68,19 +68,11 @@ namespace UnityEngine.InputSystem
 
                     onUpdate(type, ref buffer);
 
-                    #if UNITY_2019_1_OR_NEWER
                     m_EventCount = buffer.eventCount;
                     m_EventWritePosition = (int)buffer.sizeInBytes;
                     if (NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(buffer.data) !=
                         NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(m_EventBuffer))
                         m_EventBuffer = buffer.data;
-                    #else
-                    if (type != InputUpdateType.BeforeRender)
-                    {
-                        m_EventCount = 0;
-                        m_EventWritePosition = 0;
-                    }
-                    #endif
                 }
                 else
                 {
@@ -93,7 +85,7 @@ namespace UnityEngine.InputSystem
         public unsafe void QueueEvent(InputEvent* eventPtr)
         {
             var eventSize = eventPtr->sizeInBytes;
-            var alignedEventSize = NumberHelpers.AlignToMultipleOf(eventSize, 4);
+            var alignedEventSize = eventSize.AlignToMultipleOf(4);
 
             lock (m_Lock)
             {

@@ -43,10 +43,7 @@ namespace UnityEngine.InputSystem.LowLevel
             }
         }
 
-        public FourCC typeStatic
-        {
-            get { return Type; }
-        }
+        public FourCC typeStatic => Type;
 
         public InputEventPtr ToEventPtr()
         {

@@ -146,22 +146,21 @@ partial class CoreTests
 
     #endif
 
+    ////FIXME: these don't seem to actually make it out and to the analytics server
     [Test]
     [Category("Analytics")]
     public void Analytics_ReceivesEventOnShutdown()
     {
-        InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate;
-
         // Add and pump some data so we're getting some meaningful metrics.
         var gamepad = InputSystem.AddDevice<Gamepad>();
         InputSystem.AddDevice<Gamepad>();
 
         InputSystem.QueueStateEvent(gamepad, new GamepadState());
         InputSystem.QueueStateEvent(gamepad, new GamepadState());
-        InputSystem.Update(InputUpdateType.Dynamic);
+        InputSystem.Update();
 
         InputSystem.QueueStateEvent(gamepad, new GamepadState());
-        InputSystem.Update(InputUpdateType.Fixed);
+        InputSystem.Update();
 
         var registeredNames = new List<string>();
         string receivedName = null;

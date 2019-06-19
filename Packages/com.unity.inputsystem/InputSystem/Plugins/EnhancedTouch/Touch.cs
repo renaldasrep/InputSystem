@@ -109,8 +109,8 @@ namespace UnityEngine.InputSystem.EnhancedTouch
             get
             {
                 // We lazily construct the array of active touches.
-                s_ActiveState.UpdateActiveTouches();
-                return new ReadOnlyArray<Touch>(s_ActiveState.activeTouches, 0, s_ActiveState.activeTouchCount);
+                s_PlayerState.UpdateActiveTouches();
+                return new ReadOnlyArray<Touch>(s_PlayerState.activeTouches, 0, s_PlayerState.activeTouchCount);
             }
         }
 
@@ -121,15 +121,15 @@ namespace UnityEngine.InputSystem.EnhancedTouch
         /// The length of this array will always correspond to the maximum number of concurrent touches supported by the system.
         /// </remarks>
         public static ReadOnlyArray<Finger> fingers =>
-            new ReadOnlyArray<Finger>(s_ActiveState.fingers, 0, s_ActiveState.totalFingerCount);
+            new ReadOnlyArray<Finger>(s_PlayerState.fingers, 0, s_PlayerState.totalFingerCount);
 
         public static ReadOnlyArray<Finger> activeFingers
         {
             get
             {
                 // We lazily construct the array of active fingers.
-                s_ActiveState.UpdateActiveFingers();
-                return new ReadOnlyArray<Finger>(s_ActiveState.activeFingers, 0, s_ActiveState.activeFingerCount);
+                s_PlayerState.UpdateActiveFingers();
+                return new ReadOnlyArray<Finger>(s_PlayerState.activeFingers, 0, s_PlayerState.activeFingerCount);
             }
         }
 
@@ -251,9 +251,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
             s_Touchscreens.AppendWithCapacity(screen, capacityIncrement: 5);
 
             // Add finger tracking to states.
-            s_ActiveState.AddFingers(screen);
-            if (InputSystem.settings.updateMode == InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate)
-                s_InactiveState.AddFingers(screen);
+            s_PlayerState.AddFingers(screen);
             #if UNITY_EDITOR
             s_EditorState.AddFingers(screen);
             #endif
@@ -268,9 +266,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
             s_Touchscreens.RemoveAtWithCapacity(index);
 
             // Remove fingers from states.
-            s_ActiveState.RemoveFingers(screen);
-            if (s_InactiveState.fingers != null)
-                s_InactiveState.RemoveFingers(screen);
+            s_PlayerState.RemoveFingers(screen);
             #if UNITY_EDITOR
             s_EditorState.RemoveFingers(screen);
             #endif
@@ -280,25 +276,17 @@ namespace UnityEngine.InputSystem.EnhancedTouch
         internal static void BeginUpdate(InputUpdateType updateType)
         {
             #if UNITY_EDITOR
-            if ((updateType == InputUpdateType.Editor && s_ActiveState.updateMask != InputUpdateType.Editor) ||
-                (updateType != InputUpdateType.Editor && s_ActiveState.updateMask == InputUpdateType.Editor))
+            if ((updateType == InputUpdateType.Editor && s_PlayerState.updateMask != InputUpdateType.Editor) ||
+                (updateType != InputUpdateType.Editor && s_PlayerState.updateMask == InputUpdateType.Editor))
             {
                 // Either swap in editor state and retain currently active player state in s_EditorState
                 // or swap player state back in.
-                MemoryHelpers.Swap(ref s_ActiveState, ref s_EditorState);
+                MemoryHelpers.Swap(ref s_PlayerState, ref s_EditorState);
             }
             #endif
 
-            // When the system is set up to support both fixed and dynamic updates, we need to
-            // swap between their states.
-            if ((updateType == InputUpdateType.Dynamic && (s_ActiveState.updateMask & InputUpdateType.Dynamic) == 0) ||
-                (updateType == InputUpdateType.Fixed && (s_ActiveState.updateMask & InputUpdateType.Fixed) == 0))
-            {
-                MemoryHelpers.Swap(ref s_ActiveState, ref s_InactiveState);
-            }
-
-            ++s_ActiveState.updateStepCount;
-            s_ActiveState.haveBuiltActiveTouches = false;
+            ++s_PlayerState.updateStepCount;
+            s_PlayerState.haveBuiltActiveTouches = false;
         }
 
         private readonly Finger m_Finger;
@@ -310,7 +298,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
         internal static InlinedArray<Action<Finger>> s_OnFingerMove;
         internal static InlinedArray<Action<Finger>> s_OnFingerUp;
 
-        internal static FingerAndTouchState s_ActiveState;
+        internal static FingerAndTouchState s_PlayerState;
         internal static FingerAndTouchState s_InactiveState;
         #if UNITY_EDITOR
         internal static FingerAndTouchState s_EditorState;

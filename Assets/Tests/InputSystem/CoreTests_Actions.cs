@@ -323,7 +323,7 @@ partial class CoreTests
             Assert.That(trace1, Is.Empty);
             Assert.That(trace2, Is.Empty);
 
-            InputSystem.QueueDeltaStateEvent(gamepad.leftStick, new Vector2(0.234f, 0.345f));
+            InputSystem.QueueDeltaStateEvent(gamepad.leftStick, new Vector2(0.345f, 0.456f));
             InputSystem.Update();
 
             var actions1 = trace1.ToArray();
@@ -351,7 +351,7 @@ partial class CoreTests
             Assert.That(actions1[2].interaction, Is.Null);
             Assert.That(actions1[2].control, Is.SameAs(gamepad.leftStick));
             Assert.That(actions1[2].ReadValue<Vector2>(),
-                Is.EqualTo(new StickDeadzoneProcessor().Process(new Vector2(0.234f, 0.345f)))
+                Is.EqualTo(new StickDeadzoneProcessor().Process(new Vector2(0.345f, 0.456f)))
                     .Using(Vector2EqualityComparer.Instance));
 
             Assert.That(actions2[0].phase, Is.EqualTo(InputActionPhase.Started));

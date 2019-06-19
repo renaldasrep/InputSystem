@@ -114,13 +114,9 @@ namespace UnityEngine.InputSystem
         {
             get
             {
-#if UNITY_2019_1_OR_NEWER
                 var command = QueryCanRunInBackground.Create();
                 if (ExecuteCommand(ref command) >= 0)
-                {
                     return command.canRunInBackground;
-                }
-#endif
                 return false;
             }
         }
@@ -198,20 +194,7 @@ namespace UnityEngine.InputSystem
         /// </remarks>
         public double lastUpdateTime => m_LastUpdateTimeInternal - InputRuntime.s_CurrentTimeOffsetToRealtimeSinceStartup;
 
-        public bool wasUpdatedThisFrame
-        {
-            get
-            {
-                var updateType = InputUpdate.s_LastUpdateType;
-                if (updateType == InputUpdateType.Dynamic || updateType == InputUpdateType.BeforeRender)
-                    return m_CurrentDynamicUpdateStepCount == InputUpdate.s_DynamicUpdateStepCount;
-                if (updateType == InputUpdateType.Fixed)
-                    return m_CurrentFixedUpdateStepCount == InputUpdate.s_FixedUpdateStepCount;
-
-                ////REVIEW: how should this behave in the editor
-                return false;
-            }
-        }
+        public bool wasUpdatedThisFrame => m_CurrentUpdateStepCount == InputUpdate.s_UpdateStepCount;
 
         /// <summary>
         /// A flattened list of controls that make up the device.
@@ -403,11 +386,9 @@ namespace UnityEngine.InputSystem
         /// <seealso cref="InputEvent.time"/>
         internal double m_LastUpdateTimeInternal;
 
-        // The dynamic and fixed update count corresponding to the current
-        // front buffers that are active on the device. We use this to know
-        // when to flip buffers.
-        internal uint m_CurrentDynamicUpdateStepCount;
-        internal uint m_CurrentFixedUpdateStepCount;
+        // Update count corresponding to the current front buffers that are active on the device.
+        // We use this to know when to flip buffers.
+        internal uint m_CurrentUpdateStepCount;
 
         // List of aliases for all controls. Each control gets a slice of this array.
         // See 'InputControl.aliases'.

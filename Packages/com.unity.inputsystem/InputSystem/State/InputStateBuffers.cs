@@ -22,51 +22,11 @@ namespace UnityEngine.InputSystem.LowLevel
         // Edit mode and play mode each get their own double buffering. Updates to them
         // are tied to focus and only one mode will actually receive state events while the
         // other mode is dormant. In the player, we only get play mode buffers, of course.
-        //
-        // For edit mode, we only need a single set of front and back buffers.
-        //
-        // For play mode, things are complicated by the fact that we can have several
-        // update slices (dynamic, fixed, before-render) in a single frame. Each such
-        // update type has its own point in time it considers the "previous" point in time.
-        // So, in the worst case where multiple update types are enabled concurrently,
-        // we have to keep multiple separate buffers for play mode.
-        //
-        // If, however, only a single update type is enabled (e.g. either fixed or dynamic),
-        // we operate the same way as edit mode with only one front and one back buffer.
-        //
-        // Buffer swapping happens differently than it does for graphics as we have to
-        // carry forward the current state of a device. In a scheme where you simply swap
-        // the meaning of front and back buffer every frame, every swap brings back the
-        // state from two frames ago. In graphics, this isn't a problem as you are expected
-        // to either clear or render over the entire frame. For us, it'd be okay as well
-        // if we could guarantee that every device gets a state event every frame -- which,
-        // however, we can't guarantee.
-        //
-        // We solve this by making buffer swapping *per device* rather than global. Only
-        // when a device actually receives a state event will we swap the front and back
-        // buffer for it. This means that what is the "current" buffer to one device may
-        // be the "previous" buffer to another. This avoids having to do any copying of
-        // state between the buffers.
-        //
-        // In play mode, when we do have multiple types of updates enabled at the same time,
-        // some additional rules apply.
-        //
-        // Before render updates never get their own state buffers. If enabled, they will
-        // process into the state buffers of the fixed and/or dynamic updates (depending
-        // on whether only one or both are enabled).
-        //
-        // Fixed and dynamic each get their own buffers. We specifically want to *NOT*
-        // optimize for this case as doing input processing from game scripts in both
-        // updates is a bad setup -- a game should decide where it wants to process input
-        // and then disable the update type that it does not need. This will put the
-        // game in a simple double buffering configuration.
-
 
         ////TODO: need to clear the current buffers when switching between edit and play mode
         ////      (i.e. if you click an editor window while in play mode, the play mode
         ////      device states will all go back to default)
         ////      actually, if we really reset on mode change, can't we just keep a single set buffers?
-
 
         public uint sizePerBuffer;
         public uint totalSize;
@@ -133,9 +93,7 @@ namespace UnityEngine.InputSystem.LowLevel
             }
         }
 
-        internal DoubleBuffers m_DynamicUpdateBuffers;
-        internal DoubleBuffers m_FixedUpdateBuffers;
-        internal DoubleBuffers m_ManualUpdateBuffers;
+        internal DoubleBuffers m_PlayerUpdateBuffers;
 
 #if UNITY_EDITOR
         internal DoubleBuffers m_EditorUpdateBuffers;
@@ -145,17 +103,11 @@ namespace UnityEngine.InputSystem.LowLevel
         {
             switch (updateType)
             {
-                case InputUpdateType.Dynamic:
-                    return m_DynamicUpdateBuffers;
-                case InputUpdateType.Fixed:
-                    return m_FixedUpdateBuffers;
                 case InputUpdateType.BeforeRender:
-                    if (m_DynamicUpdateBuffers.valid)
-                        return m_DynamicUpdateBuffers;
-                    else
-                        return m_FixedUpdateBuffers;
+                case InputUpdateType.Fixed:
+                case InputUpdateType.Dynamic:
                 case InputUpdateType.Manual:
-                    return m_ManualUpdateBuffers;
+                    return m_PlayerUpdateBuffers;
 #if UNITY_EDITOR
                 case InputUpdateType.Editor:
                     return m_EditorUpdateBuffers;
@@ -194,7 +146,7 @@ namespace UnityEngine.InputSystem.LowLevel
             sizePerBuffer = ComputeSizeOfSingleBufferAndOffsetForEachDevice(devices, deviceCount, ref newDeviceOffsets);
             if (sizePerBuffer == 0)
                 return null;
-            sizePerBuffer = NumberHelpers.AlignToMultipleOf(sizePerBuffer, 4);
+            sizePerBuffer = sizePerBuffer.AlignToMultipleOf(4);
 
             var isDynamicUpdateEnabled = (updateMask & InputUpdateType.Dynamic) != 0;
             var isFixedUpdateEnabled = (updateMask & InputUpdateType.Fixed) != 0;
@@ -234,24 +186,9 @@ namespace UnityEngine.InputSystem.LowLevel
 
             // Set up device to buffer mappings.
             var ptr = (byte*)m_AllBuffers;
-            if (isDynamicUpdateEnabled)
-            {
-                m_DynamicUpdateBuffers =
-                    SetUpDeviceToBufferMappings(devices, deviceCount, ref ptr, sizePerBuffer,
-                        mappingTableSizePerBuffer);
-            }
-            if (isFixedUpdateEnabled)
-            {
-                m_FixedUpdateBuffers =
-                    SetUpDeviceToBufferMappings(devices, deviceCount, ref ptr, sizePerBuffer,
-                        mappingTableSizePerBuffer);
-            }
-            if (isManualUpdateEnabled)
-            {
-                m_ManualUpdateBuffers =
-                    SetUpDeviceToBufferMappings(devices, deviceCount, ref ptr, sizePerBuffer,
-                        mappingTableSizePerBuffer);
-            }
+            m_PlayerUpdateBuffers =
+                SetUpDeviceToBufferMappings(devices, deviceCount, ref ptr, sizePerBuffer,
+                    mappingTableSizePerBuffer);
 
             #if UNITY_EDITOR
             m_EditorUpdateBuffers =
@@ -293,8 +230,7 @@ namespace UnityEngine.InputSystem.LowLevel
                 m_AllBuffers = null;
             }
 
-            m_DynamicUpdateBuffers = new DoubleBuffers();
-            m_FixedUpdateBuffers = new DoubleBuffers();
+            m_PlayerUpdateBuffers = new DoubleBuffers();
 
 #if UNITY_EDITOR
             m_EditorUpdateBuffers = new DoubleBuffers();
@@ -327,9 +263,7 @@ namespace UnityEngine.InputSystem.LowLevel
             // and the new set of buffers.
             if (oldBuffers.totalSize > 0)
             {
-                MigrateDoubleBuffer(m_DynamicUpdateBuffers, devices, deviceCount, newStateBlockOffsets, oldBuffers.m_DynamicUpdateBuffers,
-                    oldDeviceIndices);
-                MigrateDoubleBuffer(m_FixedUpdateBuffers, devices, deviceCount, newStateBlockOffsets, oldBuffers.m_FixedUpdateBuffers,
+                MigrateDoubleBuffer(m_PlayerUpdateBuffers, devices, deviceCount, newStateBlockOffsets, oldBuffers.m_PlayerUpdateBuffers,
                     oldDeviceIndices);
 
 #if UNITY_EDITOR
@@ -442,7 +376,7 @@ namespace UnityEngine.InputSystem.LowLevel
             for (var i = 0; i < deviceCount; ++i)
             {
                 var sizeOfDevice = devices[i].m_StateBlock.alignedSizeInBytes;
-                sizeOfDevice = NumberHelpers.AlignToMultipleOf(sizeOfDevice, 4);
+                sizeOfDevice = sizeOfDevice.AlignToMultipleOf(4);
                 if (sizeOfDevice == 0) // Shouldn't happen as we don't allow empty layouts but make sure we catch this if something slips through.
                     throw new ArgumentException($"Device '{devices[i]}' has a zero-size state buffer", nameof(devices));
                 result[i] = sizeInBytes;

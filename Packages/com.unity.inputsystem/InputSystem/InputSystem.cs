@@ -1126,9 +1126,8 @@ namespace UnityEngine.InputSystem
         public static void Update(InputUpdateType updateType)
         {
             if (updateType != InputUpdateType.None && (s_Manager.updateMask & updateType) == 0)
-                throw new ArgumentException(
-                    $"'{updateType}' updates are not enabled; InputSystem.settings.updateMode is set to '{settings.updateMode}'",
-                    nameof(updateType));
+                throw new InvalidOperationException(
+                    $"'{updateType}' updates are not enabled; InputSystem.settings.updateMode is set to '{settings.updateMode}'");
             s_Manager.Update(updateType);
         }
 
@@ -1717,6 +1716,8 @@ namespace UnityEngine.InputSystem
             {
                 foreach (var device in s_Manager.devices)
                     device.NotifyRemoved();
+                
+                s_Manager.UninstallGlobals();
             }
 
             // Create temporary settings. In the tests, this is all we need. But outside of tests,

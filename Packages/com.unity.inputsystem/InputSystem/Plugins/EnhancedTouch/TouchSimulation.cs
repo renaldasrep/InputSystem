@@ -151,7 +151,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
                 foreach (var control in pointer.allControls)
                     if (control is ButtonControl button && !button.synthetic)
                     {
-                        InputState.AddChangeMonitor(button, this, ((long)buttonIndex << 32) | i);
+                        InputState.AddChangeMonitor(button, this, ((long)(uint)buttonIndex << 32) | (uint)i);
                         ++buttonIndex;
                     }
             }
@@ -169,7 +169,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
                 foreach (var control in pointer.allControls)
                     if (control is ButtonControl button && !button.synthetic)
                     {
-                        InputState.RemoveChangeMonitor(button, this, ((long)buttonIndex << 32) | i);
+                        InputState.RemoveChangeMonitor(button, this, ((long)(uint)buttonIndex << 32) | (uint)i);
                         ++buttonIndex;
                     }
             }

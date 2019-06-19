@@ -65,9 +65,7 @@ namespace UnityEngine.InputSystem.LowLevel
                         }
                         catch (Exception e)
                         {
-                            Debug.LogError(string.Format(
-                                "{0} during event processing of {1} update; resetting event buffer",
-                                e.GetType().Name, updateType));
+                            Debug.LogError($"{e.GetType().Name} during event processing of {updateType} update; resetting event buffer");
                             Debug.LogException(e);
                             buffer.Reset();
                         }
@@ -179,6 +177,7 @@ namespace UnityEngine.InputSystem.LowLevel
 
         public double currentTime => NativeInputSystem.currentTime;
 
+        ////REVIEW: this applies the offset, currentTime doesn't
         public double currentTimeForFixedUpdate => Time.fixedUnscaledTime + currentTimeOffsetToRealtimeSinceStartup;
 
         public double currentTimeOffsetToRealtimeSinceStartup => NativeInputSystem.currentTimeOffsetToRealtimeSinceStartup;

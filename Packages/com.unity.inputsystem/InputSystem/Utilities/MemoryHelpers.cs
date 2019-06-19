@@ -53,23 +53,6 @@ namespace UnityEngine.InputSystem.Utilities
             return (uint)(byteOffset + sizeInBits / 8 + (sizeInBits % 8 > 0 ? 1 : 0));
         }
 
-        public static bool BitRegionOverlapsMemory(uint byteOffset, uint bitOffset, uint sizeInBits, uint memoryOffset,
-            uint memorySizeInBytes)
-        {
-            if (sizeInBits % 8 == 0 && bitOffset == 0)
-            {
-                // Simple byte aligned case.
-                return byteOffset + sizeInBits / 8 > memoryOffset && memoryOffset + memorySizeInBytes > byteOffset;
-            }
-
-            // Bit aligned case.
-            if (memoryOffset > byteOffset)
-            {
-                return bitOffset + sizeInBits > ((ulong)(memoryOffset - byteOffset)) * 8;
-            }
-            return memorySizeInBytes * 8 > (ulong)(byteOffset - memoryOffset) * 8 + bitOffset;
-        }
-
         public static void WriteSingleBit(void* ptr, uint bitOffset, bool value)
         {
             if (bitOffset < 8)

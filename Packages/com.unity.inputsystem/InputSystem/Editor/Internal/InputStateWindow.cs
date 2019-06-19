@@ -133,21 +133,13 @@ namespace UnityEngine.InputSystem.Editor
 
             switch (selector)
             {
-                case BufferSelector.DynamicUpdateFrontBuffer:
-                    if (manager.m_StateBuffers.m_DynamicUpdateBuffers.valid)
-                        return manager.m_StateBuffers.m_DynamicUpdateBuffers.GetFrontBuffer(deviceIndex);
+                case BufferSelector.PlayerUpdateFrontBuffer:
+                    if (manager.m_StateBuffers.m_PlayerUpdateBuffers.valid)
+                        return manager.m_StateBuffers.m_PlayerUpdateBuffers.GetFrontBuffer(deviceIndex);
                     break;
-                case BufferSelector.DynamicUpdateBackBuffer:
-                    if (manager.m_StateBuffers.m_DynamicUpdateBuffers.valid)
-                        return manager.m_StateBuffers.m_DynamicUpdateBuffers.GetBackBuffer(deviceIndex);
-                    break;
-                case BufferSelector.FixedUpdateFrontBuffer:
-                    if (manager.m_StateBuffers.m_FixedUpdateBuffers.valid)
-                        return manager.m_StateBuffers.m_FixedUpdateBuffers.GetFrontBuffer(deviceIndex);
-                    break;
-                case BufferSelector.FixedUpdateBackBuffer:
-                    if (manager.m_StateBuffers.m_FixedUpdateBuffers.valid)
-                        return manager.m_StateBuffers.m_FixedUpdateBuffers.GetBackBuffer(deviceIndex);
+                case BufferSelector.PlayerUpdateBackBuffer:
+                    if (manager.m_StateBuffers.m_PlayerUpdateBuffers.valid)
+                        return manager.m_StateBuffers.m_PlayerUpdateBuffers.GetBackBuffer(deviceIndex);
                     break;
                 case BufferSelector.EditorUpdateFrontBuffer:
                     if (manager.m_StateBuffers.m_EditorUpdateBuffers.valid)
@@ -307,14 +299,14 @@ namespace UnityEngine.InputSystem.Editor
 
         private enum BufferSelector
         {
-            DynamicUpdateFrontBuffer,
-            DynamicUpdateBackBuffer,
+            PlayerUpdateFrontBuffer,
+            PlayerUpdateBackBuffer,
             FixedUpdateFrontBuffer,
             FixedUpdateBackBuffer,
             EditorUpdateFrontBuffer,
             EditorUpdateBackBuffer,
             COUNT,
-            Default = DynamicUpdateFrontBuffer
+            Default = PlayerUpdateFrontBuffer
         }
 
         private static class Styles

@@ -56,15 +56,15 @@ namespace UnityEngine.InputSystem.EnhancedTouch
 
         private static void SetUpState()
         {
-            Touch.s_ActiveState.updateMask = InputUpdateType.Dynamic | InputUpdateType.Manual;
+            Touch.s_PlayerState.updateMask = InputUpdateType.Dynamic | InputUpdateType.Manual;
             Touch.s_InactiveState.updateMask = InputUpdateType.Fixed;
             #if UNITY_EDITOR
             Touch.s_EditorState.updateMask = InputUpdateType.Editor;
             #endif
 
             s_UpdateMode = InputSystem.settings.updateMode;
-            if (s_UpdateMode == InputSettings.UpdateMode.ProcessEventsInFixedUpdateOnly)
-                MemoryHelpers.Swap(ref Touch.s_ActiveState, ref Touch.s_InactiveState);
+            if (s_UpdateMode == InputSettings.UpdateMode.ProcessEventsInFixedUpdate)
+                MemoryHelpers.Swap(ref Touch.s_PlayerState, ref Touch.s_InactiveState);
 
             foreach (var device in InputSystem.devices)
                 OnDeviceChange(device, InputDeviceChange.Added);
@@ -75,13 +75,13 @@ namespace UnityEngine.InputSystem.EnhancedTouch
             foreach (var device in InputSystem.devices)
                 OnDeviceChange(device, InputDeviceChange.Removed);
 
-            Touch.s_ActiveState.Destroy();
+            Touch.s_PlayerState.Destroy();
             Touch.s_InactiveState.Destroy();
             #if UNITY_EDITOR
             Touch.s_EditorState.Destroy();
             #endif
 
-            Touch.s_ActiveState = default;
+            Touch.s_PlayerState = default;
             Touch.s_InactiveState = default;
             #if UNITY_EDITOR
             Touch.s_EditorState = default;

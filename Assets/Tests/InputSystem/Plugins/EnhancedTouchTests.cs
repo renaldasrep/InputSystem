@@ -45,7 +45,7 @@ internal class EnhancedTouchTests : InputTestFixture
 
         // Make sure cleanup really did clean up.
         Assert.That(Touch.s_Touchscreens.length, Is.EqualTo(0));
-        Assert.That(Touch.s_ActiveState, Is.EqualTo(default(Touch.FingerAndTouchState)));
+        Assert.That(Touch.s_PlayerState, Is.EqualTo(default(Touch.FingerAndTouchState)));
         Assert.That(Touch.s_InactiveState, Is.EqualTo(default(Touch.FingerAndTouchState)));
         #if UNITY_EDITOR
         Assert.That(Touch.s_EditorState, Is.EqualTo(default(Touch.FingerAndTouchState)));
@@ -123,10 +123,8 @@ internal class EnhancedTouchTests : InputTestFixture
     [Test]
     [Category("EnhancedTouch")]
     [TestCase(InputSettings.UpdateMode.ProcessEventsManually, InputUpdateType.Manual)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInDynamicUpdateOnly, InputUpdateType.Dynamic)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInFixedUpdateOnly, InputUpdateType.Fixed)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate, InputUpdateType.Fixed)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate, InputUpdateType.Dynamic)]
+    [TestCase(InputSettings.UpdateMode.ProcessEventsInDynamicUpdate, InputUpdateType.Dynamic)]
+    [TestCase(InputSettings.UpdateMode.ProcessEventsInFixedUpdate, InputUpdateType.Fixed)]
     public void EnhancedTouch_SupportsInputUpdateIn(InputSettings.UpdateMode updateMode, InputUpdateType updateType)
     {
         InputSystem.settings.updateMode = updateMode;
@@ -144,9 +142,8 @@ internal class EnhancedTouchTests : InputTestFixture
     [Test]
     [Category("EnhancedTouch")]
     [TestCase(InputSettings.UpdateMode.ProcessEventsManually)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInDynamicUpdateOnly)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInFixedUpdateOnly)]
-    [TestCase(InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate)]
+    [TestCase(InputSettings.UpdateMode.ProcessEventsInDynamicUpdate)]
+    [TestCase(InputSettings.UpdateMode.ProcessEventsInFixedUpdate)]
     public void EnhancedTouch_SupportsEditorUpdates(InputSettings.UpdateMode updateMode)
     {
         InputSystem.settings.timesliceEvents = false;
@@ -179,36 +176,6 @@ internal class EnhancedTouchTests : InputTestFixture
     }
 
     #endif
-
-    [Test]
-    [Category("EnhancedTouch")]
-    public void EnhancedTouch_SupportsFixedAndDynamicUpdateEnabledAtSameTime()
-    {
-        InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate;
-        InputSystem.settings.timesliceEvents = false;
-
-        BeginTouch(1, new Vector2(0.123f, 0.234f), queueEventOnly: true);
-        EndTouch(1, new Vector2(0.234f, 0.345f), queueEventOnly: true);
-
-        InputSystem.Update(InputUpdateType.Fixed);
-
-        Assert.That(Touch.activeTouches, Has.Count.EqualTo(1));
-        Assert.That(Touch.activeTouches[0].touchId, Is.EqualTo(1));
-        Assert.That(Touch.activeTouches[0].phase, Is.EqualTo(TouchPhase.Ended));
-        Assert.That(Touch.activeTouches[0].screenPosition,
-            Is.EqualTo(new Vector2(0.234f, 0.345f)).Using(Vector2EqualityComparer.Instance));
-
-        InputSystem.Update(InputUpdateType.Fixed);
-
-        Assert.That(Touch.activeTouches, Is.Empty);
-
-        InputSystem.Update(InputUpdateType.Dynamic);
-
-        Assert.That(Touch.activeTouches, Has.Count.EqualTo(1));
-        Assert.That(Touch.activeTouches[0].touchId, Is.EqualTo(1));
-        Assert.That(Touch.activeTouches[0].screenPosition,
-            Is.EqualTo(new Vector2(0.234f, 0.345f)).Using(Vector2EqualityComparer.Instance));
-    }
 
     #endregion
 

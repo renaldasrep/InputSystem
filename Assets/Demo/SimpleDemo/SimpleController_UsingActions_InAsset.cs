@@ -30,7 +30,7 @@ public class SimpleController_UsingActions_InAsset : MonoBehaviour
         ////       happens in Update(). So, if we're looking at m_Look, for example, we will see mouse deltas
         ////       on it but then also see the deltas get reset between updates meaning that most of the time
         ////       Update() will end up with a zero m_Look vector.
-        InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInDynamicUpdateOnly;
+        InputSystem.settings.updateMode = InputSettings.UpdateMode.ProcessEventsInDynamicUpdate;
     }
 
     void OnCollisionStay()

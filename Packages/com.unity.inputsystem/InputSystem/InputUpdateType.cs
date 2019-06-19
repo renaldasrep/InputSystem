@@ -69,8 +69,7 @@ namespace UnityEngine.InputSystem
     internal static class InputUpdate
     {
         public static InputUpdateType s_LastUpdateType;
-        public static uint s_DynamicUpdateStepCount;
-        public static uint s_FixedUpdateStepCount;
+        public static uint s_UpdateStepCount;
         public static uint s_LastUpdateRetainedEventBytes;
         public static uint s_LastUpdateRetainedEventCount;
 
@@ -78,8 +77,7 @@ namespace UnityEngine.InputSystem
         public struct SerializedState
         {
             public InputUpdateType lastUpdateType;
-            public uint dynamicUpdateStepCount;
-            public uint fixedUpdateStepCount;
+            public uint updateStepCount;
             public uint lastUpdateRetainedEventBytes;
             public uint lastUpdateRetainedEventCount;
         }
@@ -89,8 +87,7 @@ namespace UnityEngine.InputSystem
             return new SerializedState
             {
                 lastUpdateType = s_LastUpdateType,
-                dynamicUpdateStepCount = s_DynamicUpdateStepCount,
-                fixedUpdateStepCount = s_FixedUpdateStepCount,
+                updateStepCount = s_UpdateStepCount,
                 lastUpdateRetainedEventBytes = s_LastUpdateRetainedEventBytes,
                 lastUpdateRetainedEventCount = s_LastUpdateRetainedEventCount,
             };
@@ -99,8 +96,7 @@ namespace UnityEngine.InputSystem
         public static void Restore(SerializedState state)
         {
             s_LastUpdateType = state.lastUpdateType;
-            s_DynamicUpdateStepCount = state.dynamicUpdateStepCount;
-            s_FixedUpdateStepCount = state.fixedUpdateStepCount;
+            s_UpdateStepCount = state.updateStepCount;
             s_LastUpdateRetainedEventBytes = state.lastUpdateRetainedEventBytes;
             s_LastUpdateRetainedEventCount = state.lastUpdateRetainedEventCount;
         }

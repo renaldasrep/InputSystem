@@ -1385,27 +1385,7 @@ namespace UnityEngine.InputSystem
             m_StateBuffers.FreeAll();
 
             // Uninstall globals.
-            if (ReferenceEquals(InputControlLayout.s_Layouts.baseLayoutTable, m_Layouts.baseLayoutTable))
-                InputControlLayout.s_Layouts = new InputControlLayout.Collection();
-            if (ReferenceEquals(InputProcessor.s_Processors.table, m_Processors.table))
-                InputProcessor.s_Processors = new TypeTable();
-            if (ReferenceEquals(InputInteraction.s_Interactions.table, m_Interactions.table))
-                InputInteraction.s_Interactions = new TypeTable();
-            if (ReferenceEquals(InputBindingComposite.s_Composites.table, m_Composites.table))
-                InputBindingComposite.s_Composites = new TypeTable();
-
-            // Detach from runtime.
-            if (m_Runtime != null)
-            {
-                m_Runtime.onUpdate = null;
-                m_Runtime.onDeviceDiscovered = null;
-                m_Runtime.onBeforeUpdate = null;
-                m_Runtime.onPlayerFocusChanged = null;
-                m_Runtime.onShouldRunUpdate = null;
-
-                if (ReferenceEquals(InputRuntime.s_Instance, m_Runtime))
-                    InputRuntime.s_Instance = null;
-            }
+            UninstallGlobals();
 
             // Destroy settings if they are temporary.
             if (m_Settings != null && m_Settings.hideFlags == HideFlags.HideAndDontSave)
@@ -1559,6 +1539,31 @@ namespace UnityEngine.InputSystem
                 InputStateBuffers.SwitchTo(m_StateBuffers, InputUpdateType.Dynamic);
                 InputStateBuffers.s_DefaultStateBuffer = m_StateBuffers.defaultStateBuffer;
                 InputStateBuffers.s_NoiseMaskBuffer = m_StateBuffers.noiseMaskBuffer;
+            }
+        }
+
+        internal void UninstallGlobals()
+        {
+            if (ReferenceEquals(InputControlLayout.s_Layouts.baseLayoutTable, m_Layouts.baseLayoutTable))
+                InputControlLayout.s_Layouts = new InputControlLayout.Collection();
+            if (ReferenceEquals(InputProcessor.s_Processors.table, m_Processors.table))
+                InputProcessor.s_Processors = new TypeTable();
+            if (ReferenceEquals(InputInteraction.s_Interactions.table, m_Interactions.table))
+                InputInteraction.s_Interactions = new TypeTable();
+            if (ReferenceEquals(InputBindingComposite.s_Composites.table, m_Composites.table))
+                InputBindingComposite.s_Composites = new TypeTable();
+
+            // Detach from runtime.
+            if (m_Runtime != null)
+            {
+                m_Runtime.onUpdate = null;
+                m_Runtime.onDeviceDiscovered = null;
+                m_Runtime.onBeforeUpdate = null;
+                m_Runtime.onPlayerFocusChanged = null;
+                m_Runtime.onShouldRunUpdate = null;
+
+                if (ReferenceEquals(InputRuntime.s_Instance, m_Runtime))
+                    InputRuntime.s_Instance = null;
             }
         }
 
@@ -1849,15 +1854,10 @@ namespace UnityEngine.InputSystem
             // Copy default state to all front and back buffers.
             var stateBlock = device.m_StateBlock;
             var deviceIndex = device.m_DeviceIndex;
-            if (m_StateBuffers.m_DynamicUpdateBuffers.valid)
+            if (m_StateBuffers.m_PlayerUpdateBuffers.valid)
             {
-                stateBlock.CopyToFrom(m_StateBuffers.m_DynamicUpdateBuffers.GetFrontBuffer(deviceIndex), defaultStateBuffer);
-                stateBlock.CopyToFrom(m_StateBuffers.m_DynamicUpdateBuffers.GetBackBuffer(deviceIndex), defaultStateBuffer);
-            }
-            if (m_StateBuffers.m_FixedUpdateBuffers.valid)
-            {
-                stateBlock.CopyToFrom(m_StateBuffers.m_FixedUpdateBuffers.GetFrontBuffer(deviceIndex), defaultStateBuffer);
-                stateBlock.CopyToFrom(m_StateBuffers.m_FixedUpdateBuffers.GetBackBuffer(deviceIndex), defaultStateBuffer);
+                stateBlock.CopyToFrom(m_StateBuffers.m_PlayerUpdateBuffers.GetFrontBuffer(deviceIndex), defaultStateBuffer);
+                stateBlock.CopyToFrom(m_StateBuffers.m_PlayerUpdateBuffers.GetBackBuffer(deviceIndex), defaultStateBuffer);
             }
 
             #if UNITY_EDITOR
@@ -2121,23 +2121,21 @@ namespace UnityEngine.InputSystem
                 // so we always preserve this if set.
                 newUpdateMask |= InputUpdateType.BeforeRender;
             }
+            if (m_Settings.updateMode == InputSettings.s_OldUnsupportedFixedAndDynamicUpdateSetting)
+                m_Settings.updateMode = InputSettings.UpdateMode.ProcessEventsInDynamicUpdate;
             switch (m_Settings.updateMode)
             {
-                case InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate:
-                    newUpdateMask |= InputUpdateType.Fixed;
+                case InputSettings.UpdateMode.ProcessEventsInDynamicUpdate:
                     newUpdateMask |= InputUpdateType.Dynamic;
                     break;
-                case InputSettings.UpdateMode.ProcessEventsInDynamicUpdateOnly:
-                    newUpdateMask |= InputUpdateType.Dynamic;
-                    break;
-                case InputSettings.UpdateMode.ProcessEventsInFixedUpdateOnly:
+                case InputSettings.UpdateMode.ProcessEventsInFixedUpdate:
                     newUpdateMask |= InputUpdateType.Fixed;
                     break;
                 case InputSettings.UpdateMode.ProcessEventsManually:
                     newUpdateMask |= InputUpdateType.Manual;
                     break;
                 default:
-                    throw new NotImplementedException("Input update mode: " + m_Settings.updateMode);
+                    throw new NotSupportedException("Invalid input update mode: " + m_Settings.updateMode);
             }
 
             #if UNITY_EDITOR
@@ -2302,13 +2300,9 @@ namespace UnityEngine.InputSystem
             InputStateBuffers.SwitchTo(m_StateBuffers, updateType);
 
             var isBeforeRenderUpdate = false;
-            if (updateType == InputUpdateType.Dynamic || updateType == InputUpdateType.Manual)
+            if (updateType == InputUpdateType.Dynamic || updateType == InputUpdateType.Manual || updateType == InputUpdateType.Fixed)
             {
-                ++InputUpdate.s_DynamicUpdateStepCount;
-            }
-            else if (updateType == InputUpdateType.Fixed)
-            {
-                ++InputUpdate.s_FixedUpdateStepCount;
+                ++InputUpdate.s_UpdateStepCount;
             }
             else if (updateType == InputUpdateType.BeforeRender)
             {
@@ -2392,8 +2386,8 @@ namespace UnityEngine.InputSystem
                     continue;
                 }
 
-                if (currentEventReadPtr->time <= currentTime)
-                    totalEventLag += currentTime - currentEventReadPtr->time;
+                if (currentEventReadPtr->internalTime <= currentTime)
+                    totalEventLag += currentTime - currentEventReadPtr->internalTime;
 
                 // Give listeners a shot at the event.
                 var listenerCount = m_EventListeners.length;
@@ -2659,46 +2653,6 @@ namespace UnityEngine.InputSystem
                 m_AfterUpdateListeners[i](updateType);
         }
 
-        /// <summary>
-        /// Switch the current set of state buffers (<see cref="InputStateBuffers"/>) to the
-        /// ones that are tracked by input actions.
-        /// </summary>
-        /// <remarks>
-        /// If both fixed and dynamic updates are enabled, we use the buffers dictated by <see cref="InputSettings.actionUpdateMode"/>.
-        /// Otherwise we use fixed, dynamic, or manual update buffers depending on <see cref="InputSettings.updateMode"/>.
-        /// </remarks>
-        private void SwitchToBuffersForActions()
-        {
-            InputUpdateType updateType;
-            switch (m_Settings.updateMode)
-            {
-                case InputSettings.UpdateMode.ProcessEventsInBothFixedAndDynamicUpdate:
-                    if (m_Settings.actionUpdateMode == InputSettings.ActionUpdateMode.UpdateActionsInFixedUpdate)
-                        updateType = InputUpdateType.Fixed;
-                    else
-                        updateType = InputUpdateType.Dynamic;
-                    break;
-
-                case InputSettings.UpdateMode.ProcessEventsInDynamicUpdateOnly:
-                    updateType = InputUpdateType.Dynamic;
-                    break;
-
-                case InputSettings.UpdateMode.ProcessEventsInFixedUpdateOnly:
-                    updateType = InputUpdateType.Fixed;
-                    break;
-
-                case InputSettings.UpdateMode.ProcessEventsManually:
-                    updateType = InputUpdateType.Manual;
-                    break;
-
-                default:
-                    throw new NotSupportedException(
-                        $"Unrecognized update mode '{m_Settings.updateMode}'; don't know which buffers to use for actions");
-            }
-
-            InputStateBuffers.SwitchTo(m_StateBuffers, updateType);
-        }
-
         // NOTE: 'newState' can be a subset of the full state stored at 'oldState'. In this case,
         //       'newStateOffsetInBytes' must give the offset into the full state and 'newStateSizeInBytes' must
         //       give the size of memory slice to be updated.
@@ -2909,26 +2863,9 @@ namespace UnityEngine.InputSystem
             }
             else
             #endif
-            if (updateType == InputUpdateType.Manual)
             {
-                WriteStateChange(m_StateBuffers.m_ManualUpdateBuffers, deviceIndex, ref stateBlockOfDevice, stateOffsetInDevice,
-                    statePtr, stateSize, flipped);
-            }
-            else
-            {
-                // For dynamic and fixed updates, we have to write into the front buffer
-                // of both updates as a state change event comes in only once and we have
-                // to reflect the most current state in both update types.
-                //
-                // If one or the other update is disabled, however, we will perform a single
-                // memcpy here.
-                if (m_StateBuffers.m_DynamicUpdateBuffers.valid)
-                    WriteStateChange(m_StateBuffers.m_DynamicUpdateBuffers, deviceIndex, ref stateBlockOfDevice,
-                        stateOffsetInDevice, statePtr, stateSize, flipped);
-
-                if (m_StateBuffers.m_FixedUpdateBuffers.valid)
-                    WriteStateChange(m_StateBuffers.m_FixedUpdateBuffers, deviceIndex, ref stateBlockOfDevice,
-                        stateOffsetInDevice, statePtr, stateSize, flipped);
+                WriteStateChange(m_StateBuffers.m_PlayerUpdateBuffers, deviceIndex, ref stateBlockOfDevice,
+                    stateOffsetInDevice, statePtr, stateSize, flipped);
             }
 
             if (device.m_LastUpdateTimeInternal <= internalTime)
@@ -2989,6 +2926,7 @@ namespace UnityEngine.InputSystem
             }
 
 #if UNITY_EDITOR
+            ////REVIEW: should this use the editor update ticks as quasi-frame-boundaries?
             // Updates go to the editor only if the game isn't playing or does not have focus.
             // Otherwise we fall through to the logic that flips for the *next* dynamic and
             // fixed updates.
@@ -3002,72 +2940,15 @@ namespace UnityEngine.InputSystem
             }
 #endif
 
-            var flipped = false;
-
-            // Fixed vs dynamic update - when both are enabled in parallel -- is a brainteaser.
-            // As far as events are concerned, we can just write them into both buffers in parallel.
-            // When we run a fixed update, for example, the upcoming dynamic data will want to see
-            // the same event data. So we can just as well write it into the dynamic update state buffers
-            // right away rather than replay the same event stream in the dynamic update.
-            //
-            // So, from this perspective, we could just as well have a single set of buffers.
-            //
-            // HOWEVER... state changes NOT coming from events are an entirely different matter
-            // that complicates the picture. Specifically, certain state changes may happen at update
-            // boundaries. Deltas will reset to (0,0), touch phases will go back to Stationary, that kind
-            // of stuff. But since update boundaries are specific to update types, we can actually end
-            // up with diverging between fixed and dynamic update.
-            //
-            // Thus the separate buffers and the more complicating buffer flipping logic here.
-
-            // If it is *NOT* a fixed update, we need to flip for the *next* coming fixed
-            // update if we haven't already.
-            if (updateType != InputUpdateType.Fixed &&
-                device.m_CurrentFixedUpdateStepCount != InputUpdate.s_FixedUpdateStepCount + 1)
+            // Flip buffers if we haven't already for this frame.
+            if (device.m_CurrentUpdateStepCount != InputUpdate.s_UpdateStepCount)
             {
-                m_StateBuffers.m_FixedUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
-                device.m_CurrentFixedUpdateStepCount = InputUpdate.s_FixedUpdateStepCount + 1;
-                flipped = true;
+                m_StateBuffers.m_PlayerUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
+                device.m_CurrentUpdateStepCount = InputUpdate.s_UpdateStepCount;
+                return true;
             }
-
-            // If it is *NOT* a dynamic update, we need to flip for the *next* coming
-            // dynamic update if we haven't already.
-            if (updateType != InputUpdateType.Dynamic &&
-                device.m_CurrentDynamicUpdateStepCount != InputUpdate.s_DynamicUpdateStepCount + 1)
-            {
-                m_StateBuffers.m_DynamicUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
-                device.m_CurrentDynamicUpdateStepCount = InputUpdate.s_DynamicUpdateStepCount + 1;
-                flipped = true;
-            }
-
-            // If it *is* a fixed update and we haven't flipped for the current update
-            // yet, do it.
-            if (updateType == InputUpdateType.Fixed &&
-                device.m_CurrentFixedUpdateStepCount != InputUpdate.s_FixedUpdateStepCount)
-            {
-                m_StateBuffers.m_FixedUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
-                device.m_CurrentFixedUpdateStepCount = InputUpdate.s_FixedUpdateStepCount;
-                flipped = true;
-            }
-
-            // If it *is* a dynamic update and we haven't flipped for the current update
-            // yet, do it.
-            if (updateType == InputUpdateType.Dynamic &&
-                device.m_CurrentDynamicUpdateStepCount != InputUpdate.s_DynamicUpdateStepCount)
-            {
-                m_StateBuffers.m_DynamicUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
-                device.m_CurrentDynamicUpdateStepCount = InputUpdate.s_DynamicUpdateStepCount;
-                flipped = true;
-            }
-
-            // In manual mode, we always flip. There are no frame boundaries.
-            if (updateType == InputUpdateType.Manual)
-            {
-                m_StateBuffers.m_ManualUpdateBuffers.SwapBuffers(device.m_DeviceIndex);
-                flipped = true;
-            }
-
-            return flipped;
+            
+            return false;
         }
 
         // Domain reload survival logic. Also used for pushing and popping input system

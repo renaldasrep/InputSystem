@@ -61,7 +61,7 @@ namespace UnityEngine.InputSystem.EnhancedTouch
                 if (touch.isInProgress)
                     return touch;
                 // Ended touches stay current in the frame they ended in.
-                if (touch.updateStepCount == Touch.s_ActiveState.updateStepCount)
+                if (touch.updateStepCount == Touch.s_PlayerState.updateStepCount)
                     return touch;
                 return default;
             }
@@ -110,12 +110,12 @@ namespace UnityEngine.InputSystem.EnhancedTouch
         private unsafe void OnTouchRecorded(InputStateHistory.Record record)
         {
             var touchState = (TouchState*)record.GetUnsafeMemoryPtr();
-            Touch.s_ActiveState.haveBuiltActiveTouches = false;
+            Touch.s_PlayerState.haveBuiltActiveTouches = false;
 
             // Record the extra data we maintain for each touch.
             var extraData = (Touch.ExtraDataPerTouchState*)record.GetUnsafeExtraMemoryPtr();
-            extraData->updateStepCount = Touch.s_ActiveState.updateStepCount;
-            extraData->uniqueId = ++Touch.s_ActiveState.lastId;
+            extraData->updateStepCount = Touch.s_PlayerState.updateStepCount;
+            extraData->uniqueId = ++Touch.s_PlayerState.lastId;
 
             // We get accumulated deltas from Touchscreen. Store the accumulated
             // value and "unaccumulate" the value we store on delta.
