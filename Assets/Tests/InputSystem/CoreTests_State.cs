@@ -965,7 +965,7 @@ partial class CoreTests
         // have a check that catches if the size changes (for good or no good reason).
         var overheadPerBuffer = 3 * sizeof(void*) * 2; // Mapping table with front and back buffer pointers for three devices.
         var combinedDeviceStateSize = (device1.stateBlock.alignedSizeInBytes + device2.stateBlock.alignedSizeInBytes +
-                                       device3.stateBlock.alignedSizeInBytes).AlignToMultipleOf(4);
+            device3.stateBlock.alignedSizeInBytes).AlignToMultipleOf(4);
         var sizePerBuffer = overheadPerBuffer + combinedDeviceStateSize * 2; // Front+back
         var sizeOfSingleBuffer = combinedDeviceStateSize;
 

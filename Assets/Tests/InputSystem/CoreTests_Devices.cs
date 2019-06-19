@@ -974,6 +974,7 @@ partial class CoreTests
 
     private class TestDeviceThatResetsStateInCallback : InputDevice, IInputStateCallbackReceiver
     {
+        [InputControl(format = "FLT")]
         public ButtonControl button { get; private set; }
 
         protected override void FinishSetup(InputDeviceBuilder builder)
@@ -982,20 +983,14 @@ partial class CoreTests
             base.FinishSetup(builder);
         }
 
-        public unsafe bool OnCarryStateForward(void* statePtr)
+        public void OnNextUpdate()
         {
-            button.WriteValueIntoState(1, statePtr);
-            return true;
+            InputState.Change(button, 1);
         }
 
-        public unsafe void OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        public void OnEvent(InputEventPtr eventPtr)
         {
-        }
-
-        public unsafe bool OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize,
-            ref uint offsetToStoreAt, InputEventPtr eventPtr)
-        {
-            return false;
+            InputState.Change(this, eventPtr);
         }
     }
 
@@ -1030,7 +1025,7 @@ partial class CoreTests
         // count as the system and is thus considered updated. Given this case won't matter
         // in practice in the player and editor, we don't bother accounting for it.
         InputSystem.Update();
-        
+
         var device = InputSystem.AddDevice<Gamepad>();
 
         Assert.That(device.wasUpdatedThisFrame, Is.False);
@@ -1061,42 +1056,39 @@ partial class CoreTests
     }
 
     [InputControlLayout(stateType = typeof(TestDeviceFullState))]
-    private class TestDeviceDecidingWhereToIntegrateState : InputDevice, IInputStateCallbackReceiver
+    private class TestDeviceIntegratingStateItself : InputDevice, IInputStateCallbackReceiver
     {
-        public unsafe bool OnCarryStateForward(void* statePtr)
-        {
-            return false;
-        }
-
-        public unsafe void OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        public void OnNextUpdate()
         {
         }
 
-        public unsafe bool OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize,
-            ref uint offsetToStoreAt, InputEventPtr eventPtr)
+        public unsafe void OnEvent(InputEventPtr eventPtr)
         {
-            Assert.That(stateFormat, Is.EqualTo(new FourCC("PART")));
-            Assert.That(stateSize, Is.EqualTo(UnsafeUtility.SizeOf<TestDevicePartialState>()));
+            // Ignore anything but TestDevicePartialState events.
+            if (eventPtr.stateFormat != new FourCC("PART"))
+                return;
+
+            Assert.That(eventPtr.stateSizeInBytes, Is.EqualTo(UnsafeUtility.SizeOf<TestDevicePartialState>()));
 
             var values = (float*)currentStatePtr;
+            var newValue = (TestDevicePartialState*)StateEvent.From(eventPtr)->state;
             for (var i = 0; i < 5; ++i)
                 if (Mathf.Approximately(values[i], 0))
                 {
-                    offsetToStoreAt = (uint)i * sizeof(float);
-                    return true;
+                    InputState.Change(this["axis" + i], newValue->axis, eventPtr: eventPtr);
+                    return;
                 }
 
             Assert.Fail();
-            return false;
         }
     }
 
     [Test]
     [Category("Devices")]
-    public void Devices_DeviceWithStateCallback_CanDecideHowToIntegrateState()
+    public void Devices_DeviceWithStateCallback_IntegratesStateItself()
     {
-        InputSystem.RegisterLayout<TestDeviceDecidingWhereToIntegrateState>();
-        var device = InputSystem.AddDevice<TestDeviceDecidingWhereToIntegrateState>();
+        InputSystem.RegisterLayout<TestDeviceIntegratingStateItself>();
+        var device = InputSystem.AddDevice<TestDeviceIntegratingStateItself>();
 
         InputSystem.QueueStateEvent(device, new TestDevicePartialState { axis = 0.123f });
         InputSystem.Update();
@@ -1104,6 +1096,12 @@ partial class CoreTests
         Assert.That(device["axis0"].ReadValueAsObject(), Is.EqualTo(0.123).Within(0.00001));
 
         InputSystem.QueueStateEvent(device, new TestDevicePartialState { axis = 0.234f });
+        InputSystem.Update();
+
+        Assert.That(device["axis0"].ReadValueAsObject(), Is.EqualTo(0.123).Within(0.00001));
+        Assert.That(device["axis1"].ReadValueAsObject(), Is.EqualTo(0.234).Within(0.00001));
+
+        InputSystem.QueueStateEvent(device, new TestDeviceFullState());
         InputSystem.Update();
 
         Assert.That(device["axis0"].ReadValueAsObject(), Is.EqualTo(0.123).Within(0.00001));

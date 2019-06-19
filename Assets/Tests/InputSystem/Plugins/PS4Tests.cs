@@ -167,7 +167,7 @@ public class PS4Tests : InputTestFixture
             interfaceName = "PS4",
             capabilities = new PS4InputDeviceDescriptor { slotId = 3, isAimController = false, defaultColorId = 0, userId = 1234 }.ToJson()
         }.ToJson(), 4);
-        
+
         InputSystem.Update();
 
         var gamepad1 = (DualShockGamepadPS4)InputSystem.devices[0];

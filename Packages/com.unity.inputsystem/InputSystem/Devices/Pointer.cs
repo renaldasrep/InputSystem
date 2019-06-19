@@ -179,7 +179,7 @@ namespace UnityEngine.InputSystem
         protected override void FinishSetup(InputDeviceBuilder builder)
         {
             if (builder == null)
-                throw new System.ArgumentNullException(nameof(builder));
+                throw new ArgumentNullException(nameof(builder));
 
             position = builder.GetControl<Vector2Control>(this, "position");
             delta = builder.GetControl<Vector2Control>(this, "delta");
@@ -194,65 +194,42 @@ namespace UnityEngine.InputSystem
             base.FinishSetup(builder);
         }
 
-        ////REVIEW: the accumulation stuff would be so much faster if we can do it directly in memory and can forgo Read/Write
-
-        protected static unsafe bool Reset(InputControl<float> control, void* statePtr)
-        {
-            if (control == null)
-                throw new System.ArgumentNullException(nameof(control));
-
-            ////FIXME: this should compare to default *state* (not value) and write default *state* (not value)
-            var value = control.ReadValueFromState(statePtr);
-            if (Mathf.Approximately(0f, value))
-                return false;
-            control.WriteValueIntoState(0f, statePtr);
-            return true;
-        }
-
         protected static unsafe void Accumulate(InputControl<float> control, void* oldStatePtr, InputEventPtr newState)
         {
             if (control == null)
                 throw new ArgumentNullException(nameof(control));
 
             if (!control.ReadUnprocessedValueFromEvent(newState, out var newDelta))
-                return;
+                return; // Value for the control not contained in the given event.
+
             var oldDelta = control.ReadUnprocessedValueFromState(oldStatePtr);
             control.WriteValueIntoEvent(oldDelta + newDelta, newState);
         }
 
-        unsafe bool IInputStateCallbackReceiver.OnCarryStateForward(void* statePtr)
+        protected void OnNextUpdate()
         {
-            return OnCarryStateForward(statePtr);
+            ////FIXME: this now also changes *both* fixed *and* dynamic
+            InputState.Change(delta, Vector2.zero);
         }
 
-        protected unsafe bool OnCarryStateForward(void* statePtr)
+        protected unsafe void OnEvent(InputEventPtr eventPtr)
         {
-            var deltaXChanged = Reset(delta.x, statePtr);
-            var deltaYChanged = Reset(delta.y, statePtr);
-            return deltaXChanged || deltaYChanged;
+            var statePtr = currentStatePtr;
+
+            Accumulate(delta.x, statePtr, eventPtr);
+            Accumulate(delta.y, statePtr, eventPtr);
+
+            InputState.Change(this, eventPtr);
         }
 
-        unsafe void IInputStateCallbackReceiver.OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        void IInputStateCallbackReceiver.OnNextUpdate()
         {
-            OnBeforeWriteNewState(oldStatePtr, newState);
+            OnNextUpdate();
         }
 
-        protected unsafe void OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        void IInputStateCallbackReceiver.OnEvent(InputEventPtr eventPtr)
         {
-            Accumulate(delta.x, oldStatePtr, newState);
-            Accumulate(delta.y, oldStatePtr, newState);
-        }
-
-        unsafe bool IInputStateCallbackReceiver.OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize,
-            ref uint offsetToStoreAt, InputEventPtr eventPtr)
-        {
-            return OnReceiveStateWithDifferentFormat(statePtr, stateFormat, stateSize, ref offsetToStoreAt, eventPtr);
-        }
-
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", Justification = "Cannot satisfy both CA1801 and CA1033 (the latter requires adding this method)")]
-        protected unsafe bool OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize, ref uint offsetToStoreAt, InputEventPtr eventPtr)
-        {
-            return false;
+            OnEvent(eventPtr);
         }
     }
 }

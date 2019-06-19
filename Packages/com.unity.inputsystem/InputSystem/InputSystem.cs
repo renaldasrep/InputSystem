@@ -1716,7 +1716,7 @@ namespace UnityEngine.InputSystem
             {
                 foreach (var device in s_Manager.devices)
                     device.NotifyRemoved();
-                
+
                 s_Manager.UninstallGlobals();
             }
 

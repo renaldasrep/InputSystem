@@ -121,6 +121,30 @@ namespace UnityEngine.InputSystem.LowLevel
 
         public InputEvent* data => m_EventPtr;
 
+        internal FourCC stateFormat
+        {
+            get
+            {
+                if (IsA<StateEvent>())
+                    return StateEvent.From(this)->stateFormat;
+                if (IsA<DeltaStateEvent>())
+                    return DeltaStateEvent.From(this)->stateFormat;
+                throw new InvalidOperationException("Event must be a StateEvent or DeltaStateEvent but is " + this);
+            }
+        }
+
+        internal uint stateSizeInBytes
+        {
+            get
+            {
+                if (IsA<StateEvent>())
+                    return StateEvent.From(this)->stateSizeInBytes;
+                if (IsA<DeltaStateEvent>())
+                    return DeltaStateEvent.From(this)->deltaStateSizeInBytes;
+                throw new InvalidOperationException("Event must be a StateEvent or DeltaStateEvent but is " + this);
+            }
+        }
+
         public bool IsA<TOtherEvent>()
             where TOtherEvent : struct, IInputEventTypeInfo
         {

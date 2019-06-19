@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.Layouts;
 using UnityEngine.InputSystem.LowLevel;
@@ -44,6 +45,44 @@ namespace UnityEngine.InputSystem.LowLevel
         InheritedPrimaryTouch = 1 << 6,
     }
 
+    // IMPORTANT: Must match TouchInputState in native code.
+    [StructLayout(LayoutKind.Explicit, Size = kSizeInBytes)]
+    internal struct NativeTouchState
+    {
+        internal const int kSizeInBytes = 36;
+
+        [FieldOffset(0)]
+        public int touchId;
+
+        [FieldOffset(4)]
+        public Vector2 position;
+
+        [FieldOffset(12)]
+        public Vector2 delta;
+
+        [FieldOffset(20)]
+        public float pressure;
+
+        [FieldOffset(24)]
+        public Vector2 radius;
+
+        [FieldOffset(32)]
+        public byte phaseId;
+
+        [FieldOffset(33)]
+        public byte tapCount;
+
+        [FieldOffset(34)]
+        public byte displayIndex;
+
+        [FieldOffset(35)]
+        public byte flags;
+
+        public static FourCC kFormat => new FourCC('T', 'O', 'U', 'C');
+
+        public FourCC format => kFormat;
+    }
+
     ////REVIEW: add timestamp directly to touch?
     /// <summary>
     /// State layout for a single touch.
@@ -55,6 +94,10 @@ namespace UnityEngine.InputSystem.LowLevel
         internal const int kSizeInBytes = 56;
 
         public static FourCC kFormat => new FourCC('T', 'O', 'U', 'C');
+
+        // Duplicates the state from NativeTouchState. We could put all [InputControl] stuff
+        // on NativeInputState and embed it here but then we'd have to expose it through the API
+        // as InputControlLayout will only look for public fields.
 
         [InputControl(layout = "Integer")]
         [FieldOffset(0)]
@@ -166,10 +209,7 @@ namespace UnityEngine.InputSystem.LowLevel
             }
         }
 
-        public FourCC format
-        {
-            get { return kFormat; }
-        }
+        public FourCC format => kFormat;
 
         public override string ToString()
         {
@@ -262,10 +302,7 @@ namespace UnityEngine.InputSystem.LowLevel
             }
         }
 
-        public FourCC format
-        {
-            get { return kFormat; }
-        }
+        public FourCC format => kFormat;
     }
 }
 
@@ -405,23 +442,19 @@ namespace UnityEngine.InputSystem
         //          not only handle this scenario but also give a generally more flexible and useful touch API
         //          than writing code directly against Touchscreen.
 
-        protected new unsafe bool OnCarryStateForward(void* statePtr)
+        protected new unsafe void OnNextUpdate()
         {
-            Profiler.BeginSample("TouchCarryStateForward");
-
-            var haveChangedState = false;
+            Profiler.BeginSample("Touchscreen.OnNextUpdate");
 
             ////TODO: early out and skip crawling through touches if we didn't change state in the last update
             ////      (also obsoletes the need for the if() check below)
+            var statePtr = currentStatePtr;
             var touchStatePtr = (TouchState*)((byte*)statePtr + stateBlock.byteOffset + TouchscreenState.kTouchDataOffset);
             for (var i = 0; i < touches.Count; ++i, ++touchStatePtr)
             {
                 // Reset delta.
                 if (touchStatePtr->delta != default)
-                {
-                    haveChangedState = true;
-                    touchStatePtr->delta = Vector2.zero;
-                }
+                    InputState.Change(touches[i].delta, Vector2.zero);
 
                 // Reset tap count.
                 // NOTE: We are basing this on startTime rather than adding on end time of the last touch. The reason is
@@ -429,44 +462,30 @@ namespace UnityEngine.InputSystem
                 //       since we know the maximum time that a tap can take, we have a reasonable estimate for when a prior
                 //       tap must have ended.
                 if (touchStatePtr->tapCount > 0 && InputState.currentTime >= touchStatePtr->startTime + s_TapTime + s_TapDelayTime)
-                {
-                    touchStatePtr->tapCount = 0;
-                    haveChangedState = true;
-                }
+                    InputState.Change(touches[i].tapCount, 0);
             }
 
             var primaryTouchState = (TouchState*)((byte*)statePtr + stateBlock.byteOffset);
             if (primaryTouchState->delta != default)
-            {
-                primaryTouchState->delta = Vector2.zero;
-                haveChangedState = true;
-            }
+                InputState.Change(primaryTouch.delta, Vector2.zero);
             if (primaryTouchState->tapCount > 0 && InputState.currentTime >= primaryTouchState->startTime + s_TapTime + s_TapDelayTime)
-            {
-                primaryTouchState->tapCount = 0;
-                haveChangedState = true;
-            }
+                InputState.Change(primaryTouch.tapCount, 0);
 
             Profiler.EndSample();
-
-            return haveChangedState;
         }
 
-        unsafe bool IInputStateCallbackReceiver.OnCarryStateForward(void* statePtr)
+        protected new unsafe void OnEvent(InputEventPtr eventPtr)
         {
-            return OnCarryStateForward(statePtr);
-        }
-
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", Justification = "Cannot satisfy both CA1801 and CA1033 (the latter requires adding this method)")]
-        protected new unsafe bool OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize,
-            ref uint offsetToStoreAt, InputEventPtr eventPtr)
-        {
-            if (stateFormat != TouchState.kFormat)
-                return false;
+            // If it's not a single touch, just take the event state as is (will have to be TouchscreenState).
+            if (eventPtr.stateFormat != TouchState.kFormat)
+            {
+                InputState.Change(this, eventPtr);
+                return;
+            }
 
             // We don't allow partial updates for TouchStates.
             if (eventPtr.IsA<DeltaStateEvent>())
-                return false;
+                return;
 
             Profiler.BeginSample("TouchAllocate");
 
@@ -474,10 +493,22 @@ namespace UnityEngine.InputSystem
             // ReadValue() of the individual TouchControl children. This means that Touchscreen,
             // unlike other devices, is hardwired to a single memory layout only.
 
-            var newTouchState = (TouchState*)((byte*)statePtr);
-            var currentTouchState = (TouchState*)((byte*)currentStatePtr + touches[0].stateBlock.byteOffset);
-            var primaryTouchState = (TouchState*)((byte*)currentStatePtr + primaryTouch.stateBlock.byteOffset);
+            var stateEventPtr = StateEvent.From(eventPtr);
+            var statePtr = currentStatePtr;
+            var currentTouchState = (TouchState*)((byte*)statePtr + touches[0].stateBlock.byteOffset);
+            var primaryTouchState = (TouchState*)((byte*)statePtr + primaryTouch.stateBlock.byteOffset);
             var touchControlCount = touches.Count;
+
+            TouchState newTouchState;
+            if (stateEventPtr->stateSizeInBytes == TouchState.kSizeInBytes)
+            {
+                newTouchState = *(TouchState*)stateEventPtr->state;
+            }
+            else
+            {
+                newTouchState = new TouchState();
+                UnsafeUtility.MemCpy(UnsafeUtility.AddressOf(ref newTouchState), stateEventPtr->state, stateEventPtr->stateSizeInBytes);
+            }
 
             ////REVIEW: The logic in here makes us inherently susceptible to the ordering of the touch events in the event
             ////        stream. I believe we have platforms (Android?) that send us touch events finger-by-finger (or touch-by-touch?)
@@ -485,54 +516,52 @@ namespace UnityEngine.InputSystem
 
             // If it's an ongoing touch, try to find the TouchState we have allocated to the touch
             // previously.
-            var phase = newTouchState->phase;
+            var phase = newTouchState.phase;
             if (phase != TouchPhase.Began)
             {
-                var touchId = newTouchState->touchId;
+                var touchId = newTouchState.touchId;
                 for (var i = 0; i < touchControlCount; ++i)
                 {
                     if (currentTouchState[i].touchId == touchId)
                     {
-                        offsetToStoreAt = (uint)i * TouchState.kSizeInBytes + TouchscreenState.kTouchDataOffset;
-
                         // Preserve primary touch state.
                         var isPrimaryTouch = currentTouchState[i].isPrimaryTouch;
                         var isInheritedPrimaryTouch = currentTouchState[i].isInheritedPrimaryTouch;
-                        newTouchState->isPrimaryTouch = isPrimaryTouch;
-                        newTouchState->isInheritedPrimaryTouch = isInheritedPrimaryTouch;
+                        newTouchState.isPrimaryTouch = isPrimaryTouch;
+                        newTouchState.isInheritedPrimaryTouch = isInheritedPrimaryTouch;
 
                         // Compute delta if touch doesn't have one.
-                        if (newTouchState->delta == default)
-                            newTouchState->delta = newTouchState->position - currentTouchState[i].position;
+                        if (newTouchState.delta == default)
+                            newTouchState.delta = newTouchState.position - currentTouchState[i].position;
 
                         // Accumulate delta.
-                        newTouchState->delta += currentTouchState[i].delta;
+                        newTouchState.delta += currentTouchState[i].delta;
 
                         // Keep start time and position.
-                        newTouchState->startTime = currentTouchState[i].startTime;
-                        newTouchState->startPosition = currentTouchState[i].startPosition;
+                        newTouchState.startTime = currentTouchState[i].startTime;
+                        newTouchState.startPosition = currentTouchState[i].startPosition;
 
                         // Detect taps.
-                        var isTap = newTouchState->isNoneEndedOrCanceled &&
-                            (eventPtr.time - newTouchState->startTime) <= s_TapTime &&
+                        var isTap = newTouchState.isNoneEndedOrCanceled &&
+                            (eventPtr.time - newTouchState.startTime) <= s_TapTime &&
                             ////REVIEW: this only takes the final delta to start position into account, not the delta over the lifetime of the
                             ////        touch; is this robust enough or do we need to make sure that we never move more than the tap radius
                             ////        over the entire lifetime of the touch?
-                            (newTouchState->position - newTouchState->startPosition).sqrMagnitude <= s_TapRadiusSquared;
+                            (newTouchState.position - newTouchState.startPosition).sqrMagnitude <= s_TapRadiusSquared;
                         if (isTap)
-                            newTouchState->tapCount = (byte)(currentTouchState[i].tapCount + 1);
+                            newTouchState.tapCount = (byte)(currentTouchState[i].tapCount + 1);
                         else
-                            newTouchState->tapCount = currentTouchState[i].tapCount; // Preserve tap count; reset in OnCarryStateForward.
+                            newTouchState.tapCount = currentTouchState[i].tapCount; // Preserve tap count; reset in OnCarryStateForward.
 
                         // Update primary touch.
                         if (isPrimaryTouch)
                         {
-                            if (newTouchState->isNoneEndedOrCanceled)
+                            if (newTouchState.isNoneEndedOrCanceled)
                             {
                                 ////REVIEW: also reset tapCounts here when tap delay time has expired on the touch?
 
-                                newTouchState->isPrimaryTouch = false;
-                                newTouchState->isInheritedPrimaryTouch = false;
+                                newTouchState.isPrimaryTouch = false;
+                                newTouchState.isInheritedPrimaryTouch = false;
 
                                 // Primary touch was ended. See if we have another ongoing touch that can take
                                 // over.
@@ -560,32 +589,34 @@ namespace UnityEngine.InputSystem
                                 {
                                     // Tap on primary touch is only triggered if the touch never switched fingers.
                                     if (isTap && !isInheritedPrimaryTouch)
-                                        TriggerTap(primaryTouch, newTouchState, eventPtr);
+                                        TriggerTap(primaryTouch, ref newTouchState, eventPtr);
                                     else
-                                        InputState.Change(primaryTouch, *newTouchState, eventPtr: eventPtr);
+                                        InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
                                 }
                             }
                             else
                             {
                                 // Primary touch was updated.
-                                InputState.Change(primaryTouch, *newTouchState, eventPtr: eventPtr);
+                                InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
                             }
                         }
 
                         if (isTap)
                         {
-                            // Make tap button go down and up. InputManager will write the new touch state
-                            // into touches[i] after we return from this method so we suppress writing the
-                            // release directly ourselves.
+                            // Make tap button go down and up.
                             //
                             // NOTE: We do this here instead of right away up there when we detect the touch so
                             //       that the state change notifications go together. First those for the primary
                             //       touch, then the ones for the touch record itself.
-                            TriggerTap(touches[i], newTouchState, eventPtr, writeRelease: false);
+                            TriggerTap(touches[i], ref newTouchState, eventPtr);
+                        }
+                        else
+                        {
+                            InputState.Change(touches[i], newTouchState, eventPtr: eventPtr);
                         }
 
                         Profiler.EndSample();
-                        return true;
+                        return;
                     }
                 }
 
@@ -593,7 +624,7 @@ namespace UnityEngine.InputSystem
                 // entries for or it's an event sent out of sequence. Ignore the touch to be consistent.
 
                 Profiler.EndSample();
-                return false;
+                return;
             }
 
             // It's a new touch. Try to find an unused TouchState.
@@ -606,24 +637,25 @@ namespace UnityEngine.InputSystem
                 //       Touch API, be aware of this!
                 if (currentTouchState->isNoneEndedOrCanceled)
                 {
-                    offsetToStoreAt = (uint)i * TouchState.kSizeInBytes + TouchscreenState.kTouchDataOffset;
-                    newTouchState->delta = Vector2.zero;
-                    newTouchState->startTime = eventPtr.time;
-                    newTouchState->startPosition = newTouchState->position;
+                    newTouchState.delta = Vector2.zero;
+                    newTouchState.startTime = eventPtr.time;
+                    newTouchState.startPosition = newTouchState.position;
 
                     // Tap counts are preserved from prior touches on the same finger.
-                    newTouchState->tapCount = currentTouchState->tapCount;
+                    newTouchState.tapCount = currentTouchState->tapCount;
 
                     // Make primary touch, if there's none currently.
                     if (primaryTouchState->isNoneEndedOrCanceled)
                     {
-                        newTouchState->isPrimaryTouch = true;
-                        newTouchState->isInheritedPrimaryTouch = false;
-                        InputState.Change(primaryTouch, *newTouchState, eventPtr: eventPtr);
+                        newTouchState.isPrimaryTouch = true;
+                        newTouchState.isInheritedPrimaryTouch = false;
+                        InputState.Change(primaryTouch, newTouchState, eventPtr: eventPtr);
                     }
 
+                    InputState.Change(touches[i], newTouchState, eventPtr: eventPtr);
+
                     Profiler.EndSample();
-                    return true;
+                    return;
                 }
             }
 
@@ -633,27 +665,21 @@ namespace UnityEngine.InputSystem
             //       by the backend (or someone is simply sending us nonsense data).
 
             Profiler.EndSample();
-            return false;
         }
 
-        unsafe bool IInputStateCallbackReceiver.OnReceiveStateWithDifferentFormat(void* statePtr, FourCC stateFormat, uint stateSize,
-            ref uint offsetToStoreAt, InputEventPtr eventPtr)
+        void IInputStateCallbackReceiver.OnNextUpdate()
         {
-            return OnReceiveStateWithDifferentFormat(statePtr, stateFormat, stateSize, ref offsetToStoreAt, eventPtr);
+            OnNextUpdate();
         }
 
-        unsafe void IInputStateCallbackReceiver.OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        void IInputStateCallbackReceiver.OnEvent(InputEventPtr eventPtr)
         {
+            OnEvent(eventPtr);
         }
 
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", Justification = "Cannot satisfy both CA1801 and CA1033 (the latter requires adding this method)")]
-        protected new unsafe void OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
-        {
-        }
-
-        // We can only detect taps on touch *release*. At which point it acts like button that triggers and releases
+        // We can only detect taps on touch *release*. At which point it acts like a button that triggers and releases
         // in one operation.
-        private static unsafe void TriggerTap(TouchControl control, TouchState* state, InputEventPtr eventPtr, bool writeRelease = true)
+        private static unsafe void TriggerTap(TouchControl control, ref TouchState state, InputEventPtr eventPtr)
         {
             ////REVIEW: we're updating the entire TouchControl here; we could update just the tap state using a delta event; problem
             ////        is that the tap *down* still needs a full update on the state
@@ -662,13 +688,12 @@ namespace UnityEngine.InputSystem
             // that got tapped and to primaryTouch.
 
             // Press.
-            state->isTap = true;
-            InputState.Change(control, *state, eventPtr: eventPtr);
+            state.isTap = true;
+            InputState.Change(control, state, eventPtr: eventPtr);
 
             // Release.
-            state->isTap = false;
-            if (writeRelease)
-                InputState.Change(control, *state, eventPtr: eventPtr);
+            state.isTap = false;
+            InputState.Change(control, state, eventPtr: eventPtr);
         }
 
         internal static float s_TapTime;

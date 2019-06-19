@@ -37,6 +37,36 @@ namespace UnityEngine.InputSystem.LowLevel
             remove => InputSystem.s_Manager.onDeviceStateChange -= value;
         }
 
+        public static unsafe void Change(InputDevice device, InputEventPtr eventPtr, InputUpdateType updateType = default)
+        {
+            if (device == null)
+                throw new ArgumentNullException(nameof(device));
+            if (!eventPtr.valid)
+                throw new ArgumentNullException(nameof(eventPtr));
+
+            // Make sure event is a StateEvent or DeltaStateEvent and has a format matching the device.
+            FourCC stateFormat;
+            if (eventPtr.IsA<StateEvent>())
+                stateFormat = StateEvent.From(eventPtr)->stateFormat;
+            else if (eventPtr.IsA<DeltaStateEvent>())
+                stateFormat = DeltaStateEvent.From(eventPtr)->stateFormat;
+            else
+            {
+                #if UNITY_EDITOR
+                InputSystem.s_Manager.m_Diagnostics?.OnEventFormatMismatch(eventPtr, device);
+                #endif
+                return;
+            }
+
+            if (stateFormat != device.stateBlock.format)
+                throw new ArgumentException(
+                    $"State format {stateFormat} from event does not match state format {device.stateBlock.format} of device {device}",
+                    nameof(eventPtr));
+
+            InputSystem.s_Manager.UpdateState(device, eventPtr,
+                updateType != default ? updateType : InputSystem.s_Manager.defaultUpdateType);
+        }
+
         /// <summary>
         /// Perform one update of input state.
         /// </summary>
@@ -44,7 +74,9 @@ namespace UnityEngine.InputSystem.LowLevel
         /// Incorporates the given state and triggers all state change monitors as needed.
         ///
         /// Note that input state changes performed with this method will not be visible on remotes as they will bypass
-        /// event processing. This can be good or bad depending on your specific usage situation.
+        /// event processing. It is effectively equivalent to directly writing into input state memory except that it
+        /// also performs related tasks such as checking state change monitors, flipping buffers, or making the respective
+        /// device current.
         /// </remarks>
         public static unsafe void Change<TState>(InputControl control, TState state, InputUpdateType updateType = default,
             InputEventPtr eventPtr = default)
@@ -53,7 +85,7 @@ namespace UnityEngine.InputSystem.LowLevel
             if (control == null)
                 throw new ArgumentNullException(nameof(control));
             if (control.stateBlock.bitOffset != 0 || control.stateBlock.sizeInBits % 8 != 0)
-                throw new ArgumentException($"Cannot change state of bitfield control '{control}' using this method");
+                throw new ArgumentException($"Cannot change state of bitfield control '{control}' using this method", nameof(control));
 
             var device = control.device;
             var stateSize = UnsafeUtility.SizeOf<TState>();

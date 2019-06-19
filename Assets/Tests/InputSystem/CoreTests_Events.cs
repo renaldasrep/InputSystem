@@ -50,6 +50,26 @@ partial class CoreTests
 
     [Test]
     [Category("Events")]
+    public void Events_CanChangeStateOfDeviceDirectlyUsingEvent()
+    {
+        var mouse = InputSystem.AddDevice<Mouse>();
+        using (StateEvent.From(mouse, out var eventPtr))
+        {
+            var stateChangeMonitorTriggered = false;
+            InputState.AddChangeMonitor(mouse.delta,
+                (c, t, e, i) => stateChangeMonitorTriggered = true);
+
+            mouse.delta.WriteValueIntoEvent(new Vector2(123, 234), eventPtr);
+
+            InputState.Change(mouse, eventPtr);
+
+            Assert.That(stateChangeMonitorTriggered, Is.True);
+            Assert.That(mouse.delta.ReadValue(), Is.EqualTo(new Vector2(123, 234)).Using(Vector2EqualityComparer.Instance));
+        }
+    }
+
+    [Test]
+    [Category("Events")]
     [Ignore("TODO")]
     public void TODO_Events_CanUpdateStateOfDeviceWithBatchEvent()
     {
@@ -182,7 +202,7 @@ partial class CoreTests
         InputSystem.Update(InputUpdateType.Manual);
 
         Assert.That(mouse.leftButton.isPressed, Is.True);
-        
+
         Assert.That(() => InputSystem.Update(InputUpdateType.Fixed), Throws.InvalidOperationException);
         Assert.That(() => InputSystem.Update(InputUpdateType.Dynamic), Throws.InvalidOperationException);
     }

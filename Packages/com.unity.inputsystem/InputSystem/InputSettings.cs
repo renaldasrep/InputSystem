@@ -319,7 +319,7 @@ namespace UnityEngine.InputSystem
         public enum UpdateMode
         {
             // Removed: ProcessEventsInBothFixedAndDynamicUpdate=0
-            
+
             /// <summary>
             /// Automatically run input updates right before every <see cref="MonoBehaviour.Update"/>.
             /// </summary>

@@ -2011,7 +2011,7 @@ namespace UnityEngine.InputSystem
             #endif
         }
 
-        private unsafe void OnBeforeUpdate(InputUpdateType updateType)
+        private void OnBeforeUpdate(InputUpdateType updateType)
         {
             // Restore devices before checking update mask. See InputSystem.RunInitialUpdate().
             RestoreDevicesAfterDomainReloadIfNecessary();
@@ -2019,92 +2019,29 @@ namespace UnityEngine.InputSystem
             if ((updateType & m_UpdateMask) == 0)
                 return;
 
+            InputStateBuffers.SwitchTo(m_StateBuffers, updateType);
+
             // For devices that have state callbacks, tell them we're carrying state over
             // into the next frame.
             if (m_HaveDevicesWithStateCallbackReceivers && updateType != InputUpdateType.BeforeRender) ////REVIEW: before-render handling is probably wrong
             {
-                var stateBuffers = m_StateBuffers.GetDoubleBuffersFor(updateType);
-                var isDynamicOrFixedUpdate =
-                    updateType == InputUpdateType.Dynamic || updateType == InputUpdateType.Fixed;
-
-                ////REVIEW: should we rather allocate a temp buffer on a per-device basis? the current code makes one
-                ////        temp allocation equal to the combined state of all devices in the system; even with touch in the
-                ////        mix, that should amount to less than 3k in most cases
-
-                // For the sake of action state monitors, we need to be able to detect when
-                // an OnCarryStateForward() method writes new values into a state buffer. To do
-                // so, we create a temporary buffer, copy state blocks into that buffer, and then
-                // run the normal action change logic on the temporary and the current state buffer.
-                using (var tempBuffer = new NativeArray<byte>((int)m_StateBuffers.sizePerBuffer, Allocator.Temp))
+                for (var i = 0; i < m_DevicesCount; ++i)
                 {
-                    var tempBufferPtr = (byte*)tempBuffer.GetUnsafeReadOnlyPtr();
-                    var currentTimeExternal = m_Runtime.currentTime - InputRuntime.s_CurrentTimeOffsetToRealtimeSinceStartup;
+                    var device = m_Devices[i];
+                    if ((device.m_DeviceFlags & InputDevice.DeviceFlags.HasStateCallbacks) == 0)
+                        continue;
 
-                    for (var i = 0; i < m_DevicesCount; ++i)
-                    {
-                        var device = m_Devices[i];
-                        if ((device.m_DeviceFlags & InputDevice.DeviceFlags.HasStateCallbacks) == 0)
-                            continue;
+                    // NOTE: We do *not* perform a buffer flip here as we do not want to change what is the
+                    //       current and what is the previous state when we carry state forward. Rather,
+                    //       OnBeforeUpdate, if it modifies state, it modifies the current state directly.
+                    //       Also, for the same reasons, we do not modify the dynamic/fixed update counts
+                    //       on the device. If an event comes in in the upcoming update, it should lead to
+                    //       a buffer flip.
 
-                        // Depending on update ordering, we are writing events into *upcoming* updates inside of
-                        // OnUpdate(). E.g. we may receive an event in fixed update and write it concurrently into
-                        // the fixed and dynamic update buffer for the device.
-                        //
-                        // This means that we have to be extra careful here not to overwrite state which has already
-                        // been updated with events. To check for this, we simply determine whether the device's update
-                        // count for the current update type already corresponds to the count of the upcoming update.
-                        //
-                        // NOTE: This is only relevant for non-editor updates.
-                        if (isDynamicOrFixedUpdate)
-                        {
-                            if (updateType == InputUpdateType.Dynamic)
-                            {
-                                if (device.m_CurrentDynamicUpdateStepCount == InputUpdate.s_DynamicUpdateStepCount + 1)
-                                    continue; // Device already received state for upcoming dynamic update.
-                            }
-                            else if (updateType == InputUpdateType.Fixed)
-                            {
-                                if (device.m_CurrentFixedUpdateStepCount == InputUpdate.s_FixedUpdateStepCount + 1)
-                                    continue; // Device already received state for upcoming fixed update.
-                            }
-                        }
-
-                        var deviceStateOffset = device.m_StateBlock.byteOffset;
-                        var deviceStateSize = device.m_StateBlock.alignedSizeInBytes;
-
-                        // Grab current front buffer.
-                        var frontBuffer = stateBuffers.GetFrontBuffer(device.m_DeviceIndex);
-
-                        // Copy to temporary buffer.
-                        var statePtr = (byte*)frontBuffer + deviceStateOffset;
-                        var tempStatePtr = tempBufferPtr + deviceStateOffset;
-                        UnsafeUtility.MemCpy(tempStatePtr, statePtr, deviceStateSize);
-
-                        // NOTE: We do *not* perform a buffer flip here as we do not want to change what is the
-                        //       current and what is the previous state when we carry state forward. Rather,
-                        //       OnCarryStateForward, if it modifies state, it modifies the current state directly.
-                        //       Also, for the same reasons, we do not modify the dynamic/fixed update counts
-                        //       on the device. If an event comes in in the upcoming update, it should lead to
-                        //       a buffer flip.
-
-                        // Show to device.
-                        if (((IInputStateCallbackReceiver)device).OnCarryStateForward(frontBuffer))
-                        {
-                            ////REVIEW: should this make the device current? (and update m_LastUpdateTimeInternal)
-
-                            // Let listeners know the device's state has changed.
-                            for (var n = 0; n < m_DeviceStateChangeListeners.length; ++n)
-                                m_DeviceStateChangeListeners[n](device);
-
-                            // Process action state change monitors.
-                            if (ProcessStateChangeMonitors(i, statePtr, tempStatePtr, deviceStateSize, 0))
-                                FireStateChangeNotifications(i, currentTimeExternal, null);
-                        }
-                    }
+                    ((IInputStateCallbackReceiver)device).OnNextUpdate();
                 }
             }
 
-            ////REVIEW: should we activate the buffers for the given update here?
             DelegateHelpers.InvokeCallbacksSafe(ref m_BeforeUpdateListeners, updateType, "onBeforeUpdate");
         }
 
@@ -2430,60 +2367,19 @@ namespace UnityEngine.InputSystem
                     case StateEvent.Type:
                     case DeltaStateEvent.Type:
 
+                        var eventPtr = new InputEventPtr(currentEventReadPtr);
+
                         // Ignore state changes if device is disabled.
                         if (!device.enabled)
                         {
                             #if UNITY_EDITOR
-                            m_Diagnostics?.OnEventForDisabledDevice(new InputEventPtr(currentEventReadPtr), device);
+                            m_Diagnostics?.OnEventForDisabledDevice(eventPtr, device);
                             #endif
                             break;
                         }
 
-                        var deviceHasStateCallbacks = (device.m_DeviceFlags & InputDevice.DeviceFlags.HasStateCallbacks) ==
+                        var deviceIsStateCallbackReceiver = (device.m_DeviceFlags & InputDevice.DeviceFlags.HasStateCallbacks) ==
                             InputDevice.DeviceFlags.HasStateCallbacks;
-                        IInputStateCallbackReceiver stateCallbacks = null;
-                        var deviceIndex = device.m_DeviceIndex;
-                        var stateBlockOfDevice = device.m_StateBlock;
-                        var stateBlockSizeOfDevice = stateBlockOfDevice.alignedSizeInBytes;
-                        var offsetInDeviceStateToCopyTo = 0u;
-                        uint sizeOfStateToCopy;
-                        uint receivedStateSize;
-                        byte* ptrToReceivedState;
-                        FourCC receivedStateFormat;
-
-                        // Grab state data from event and decide where to copy to and how much to copy.
-                        if (currentEventType == StateEvent.Type)
-                        {
-                            var stateEventPtr = (StateEvent*)currentEventReadPtr;
-                            receivedStateFormat = stateEventPtr->stateFormat;
-                            receivedStateSize = stateEventPtr->stateSizeInBytes;
-                            ptrToReceivedState = (byte*)stateEventPtr->state;
-
-                            // Ignore extra state at end of event.
-                            sizeOfStateToCopy = receivedStateSize;
-                            if (sizeOfStateToCopy > stateBlockSizeOfDevice)
-                                sizeOfStateToCopy = stateBlockSizeOfDevice;
-                        }
-                        else
-                        {
-                            Debug.Assert(currentEventType == DeltaStateEvent.Type);
-
-                            var deltaEventPtr = (DeltaStateEvent*)currentEventReadPtr;
-                            receivedStateFormat = deltaEventPtr->stateFormat;
-                            receivedStateSize = deltaEventPtr->deltaStateSizeInBytes;
-                            ptrToReceivedState = (byte*)deltaEventPtr->deltaState;
-                            offsetInDeviceStateToCopyTo = deltaEventPtr->stateOffset;
-
-                            // Ignore extra state at end of event.
-                            sizeOfStateToCopy = receivedStateSize;
-                            if (offsetInDeviceStateToCopyTo + sizeOfStateToCopy > stateBlockSizeOfDevice)
-                            {
-                                if (offsetInDeviceStateToCopyTo >= stateBlockSizeOfDevice)
-                                    break; // Entire delta state is out of range.
-
-                                sizeOfStateToCopy = stateBlockSizeOfDevice - offsetInDeviceStateToCopyTo;
-                            }
-                        }
 
                         // Ignore the event if the last state update we received for the device was
                         // newer than this state event is. We don't allow devices to go back in time.
@@ -2493,11 +2389,8 @@ namespace UnityEngine.InputSystem
                         //       a global ordering of events as there may be multiple substreams (e.g. each individual touch)
                         //       that are generated in the backend and would require considerable work to ensure monotonically
                         //       increasing timestamps across all such streams.
-                        //
-                        //       This exception isn't elegant. But then, the entire IInputStateCallbackReceiver thing
-                        //       is anything but elegant...
                         if (currentEventTimeInternal < device.m_LastUpdateTimeInternal &&
-                            !(deviceHasStateCallbacks && stateBlockOfDevice.format != receivedStateFormat))
+                            !(deviceIsStateCallbackReceiver && device.stateBlock.format != eventPtr.stateFormat))
                         {
                             #if UNITY_EDITOR
                             m_Diagnostics?.OnEventTimestampOutdated(new InputEventPtr(currentEventReadPtr), device);
@@ -2505,47 +2398,27 @@ namespace UnityEngine.InputSystem
                             break;
                         }
 
-                        // If the state format doesn't match, see if the device knows what to do.
-                        // If not, ignore the event.
-                        if (stateBlockOfDevice.format != receivedStateFormat)
+                        // Update the state of the device from the event. If the device is an IInputStateCallbackReceiver,
+                        // let the device handle the event. If not, we do it ourselves.
+                        if (deviceIsStateCallbackReceiver)
                         {
-                            var canIncorporateUnrecognizedState = false;
-                            if (deviceHasStateCallbacks)
-                            {
-                                if (stateCallbacks == null)
-                                    stateCallbacks = (IInputStateCallbackReceiver)device;
-                                canIncorporateUnrecognizedState =
-                                    stateCallbacks.OnReceiveStateWithDifferentFormat(ptrToReceivedState, receivedStateFormat,
-                                        receivedStateSize, ref offsetInDeviceStateToCopyTo, currentEventReadPtr);
-                            }
-
-                            if (!canIncorporateUnrecognizedState)
+                            // NOTE: We leave it to the device to make sure the event has the right format. This allows the
+                            //       device to handle multiple different incoming formats.
+                            ((IInputStateCallbackReceiver)device).OnEvent(eventPtr);
+                        }
+                        else
+                        {
+                            // If the state format doesn't match, ignore the event.
+                            if (device.stateBlock.format != eventPtr.stateFormat)
                             {
                                 #if UNITY_EDITOR
                                 m_Diagnostics?.OnEventFormatMismatch(currentEventReadPtr, device);
                                 #endif
                                 break;
                             }
+
+                            UpdateState(device, eventPtr, updateType);
                         }
-
-                        // If the device has state callbacks, give it a shot at running custom logic on
-                        // the new state before we integrate it into the system.
-                        if (deviceHasStateCallbacks)
-                        {
-                            if (stateCallbacks == null)
-                                stateCallbacks = (IInputStateCallbackReceiver)device;
-
-                            ////FIXME: when both fixed and dynamic updates are enabled, this will read state from the current update, then combine it with the new state, and then write into
-                            ////       both dynamic and fixed update (do we care??)
-
-                            var currentState = InputStateBuffers.GetFrontBufferForDevice(deviceIndex);
-                            stateCallbacks.OnBeforeWriteNewState(currentState, currentEventReadPtr);
-                        }
-
-                        // Write state.
-                        UpdateState(device, updateType, ptrToReceivedState, offsetInDeviceStateToCopyTo,
-                            sizeOfStateToCopy, currentEventTimeInternal, currentEventReadPtr);
-
                         break;
 
                     case TextEvent.Type:
@@ -2759,8 +2632,6 @@ namespace UnityEngine.InputSystem
             if (timeoutCount == 0)
                 return;
 
-            SwitchToBuffersForActions();
-
             // Go through the list and both trigger expired timers and remove any irrelevant
             // ones by compacting the array.
             // NOTE: We do not actually release any memory we may have allocated.
@@ -2794,6 +2665,59 @@ namespace UnityEngine.InputSystem
             }
 
             m_StateChangeMonitorTimeouts.SetLength(remainingTimeoutCount);
+        }
+
+        internal unsafe void UpdateState(InputDevice device, InputEvent* eventPtr, InputUpdateType updateType)
+        {
+            Debug.Assert(eventPtr != null, "Received NULL event ptr");
+
+            var stateBlockOfDevice = device.m_StateBlock;
+            var stateBlockSizeOfDevice = stateBlockOfDevice.alignedSizeInBytes;
+            var offsetInDeviceStateToCopyTo = 0u;
+            uint sizeOfStateToCopy;
+            uint receivedStateSize;
+            byte* ptrToReceivedState;
+            FourCC receivedStateFormat;
+
+            // Grab state data from event and decide where to copy to and how much to copy.
+            if (eventPtr->type == StateEvent.Type)
+            {
+                var stateEventPtr = (StateEvent*)eventPtr;
+                receivedStateFormat = stateEventPtr->stateFormat;
+                receivedStateSize = stateEventPtr->stateSizeInBytes;
+                ptrToReceivedState = (byte*)stateEventPtr->state;
+
+                // Ignore extra state at end of event.
+                sizeOfStateToCopy = receivedStateSize;
+                if (sizeOfStateToCopy > stateBlockSizeOfDevice)
+                    sizeOfStateToCopy = stateBlockSizeOfDevice;
+            }
+            else
+            {
+                Debug.Assert(eventPtr->type == DeltaStateEvent.Type, "Given event must either be a StateEvent or a DeltaStateEvent");
+
+                var deltaEventPtr = (DeltaStateEvent*)eventPtr;
+                receivedStateFormat = deltaEventPtr->stateFormat;
+                receivedStateSize = deltaEventPtr->deltaStateSizeInBytes;
+                ptrToReceivedState = (byte*)deltaEventPtr->deltaState;
+                offsetInDeviceStateToCopyTo = deltaEventPtr->stateOffset;
+
+                // Ignore extra state at end of event.
+                sizeOfStateToCopy = receivedStateSize;
+                if (offsetInDeviceStateToCopyTo + sizeOfStateToCopy > stateBlockSizeOfDevice)
+                {
+                    if (offsetInDeviceStateToCopyTo >= stateBlockSizeOfDevice)
+                        return; // Entire delta state is out of range.
+
+                    sizeOfStateToCopy = stateBlockSizeOfDevice - offsetInDeviceStateToCopyTo;
+                }
+            }
+
+            Debug.Assert(device.m_StateBlock.format == receivedStateFormat, "Received state format does not match format of device");
+
+            // Write state.
+            UpdateState(device, updateType, ptrToReceivedState, offsetInDeviceStateToCopyTo,
+                sizeOfStateToCopy, eventPtr->internalTime, eventPtr);
         }
 
         /// <summary>
@@ -2947,7 +2871,7 @@ namespace UnityEngine.InputSystem
                 device.m_CurrentUpdateStepCount = InputUpdate.s_UpdateStepCount;
                 return true;
             }
-            
+
             return false;
         }
 

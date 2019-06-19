@@ -173,30 +173,30 @@ namespace UnityEngine.InputSystem
             base.FinishSetup(builder);
         }
 
-        unsafe bool IInputStateCallbackReceiver.OnCarryStateForward(void* statePtr)
+        protected new void OnNextUpdate()
         {
-            return OnCarryStateForward(statePtr);
+            base.OnNextUpdate();
+            InputState.Change(scroll, Vector2.zero);
         }
 
-        protected unsafe new bool OnCarryStateForward(void* statePtr)
+        protected new unsafe void OnEvent(InputEventPtr eventPtr)
         {
-            var scrollXChanged = Reset(scroll.x, statePtr);
-            var scrollYChanged = Reset(scroll.y, statePtr);
-            return scrollXChanged || scrollYChanged || base.OnCarryStateForward(statePtr);
+            var statePtr = currentStatePtr;
+
+            Accumulate(scroll.x, statePtr, eventPtr);
+            Accumulate(scroll.y, statePtr, eventPtr);
+
+            base.OnEvent(eventPtr);
         }
 
-        unsafe void IInputStateCallbackReceiver.OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        void IInputStateCallbackReceiver.OnNextUpdate()
         {
-            OnBeforeWriteNewState(oldStatePtr, newState);
+            OnNextUpdate();
         }
 
-        protected unsafe new void OnBeforeWriteNewState(void* oldStatePtr, InputEventPtr newState)
+        void IInputStateCallbackReceiver.OnEvent(InputEventPtr eventPtr)
         {
-            ////REVIEW: this sucks for actions; they see each value change but the changes are no longer independent;
-            ////        is accumulation really something we want? should we only reset?
-            base.OnBeforeWriteNewState(oldStatePtr, newState);
-            Accumulate(scroll.x, oldStatePtr, newState);
-            Accumulate(scroll.y, oldStatePtr, newState);
+            OnEvent(eventPtr);
         }
     }
 }
