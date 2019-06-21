@@ -574,8 +574,8 @@ namespace UnityEngine.InputSystem
                                 }
                                 else
                                 {
-                                    // Yes, we have other touches going on. Orphan the primary touch
-                                    // and
+                                    // Yes, we have other touches going on. Make the primary touch an
+                                    // orphan and wait until the other touches are released.
 
                                     var newPrimaryTouchState = newTouchState;
                                     newPrimaryTouchState.phase = TouchPhase.Moved;
@@ -595,8 +595,24 @@ namespace UnityEngine.InputSystem
                             // orphaned primary touch. If so, end it now.
                             if (newTouchState.isNoneEndedOrCanceled && primaryTouchState->isOrphanedPrimaryTouch)
                             {
-                                primaryTouchState->isOrphanedPrimaryTouch = false;
-                                InputState.Change(primaryTouch.phase, (byte)TouchPhase.Ended);
+                                var haveOngoingTouch = false;
+                                for (var n = 0; n < touchControlCount; ++n)
+                                {
+                                    if (n == i)
+                                        continue;
+
+                                    if (currentTouchState[n].isInProgress)
+                                    {
+                                        haveOngoingTouch = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!haveOngoingTouch)
+                                {
+                                    primaryTouchState->isOrphanedPrimaryTouch = false;
+                                    InputState.Change(primaryTouch.phase, (byte)TouchPhase.Ended);
+                                }
                             }
                         }
 
@@ -639,6 +655,11 @@ namespace UnityEngine.InputSystem
                     newTouchState.delta = Vector2.zero;
                     newTouchState.startTime = eventPtr.time;
                     newTouchState.startPosition = newTouchState.position;
+                    
+                    // Make sure we're not picking up noise sent from native.
+                    newTouchState.isPrimaryTouch = false;
+                    newTouchState.isOrphanedPrimaryTouch = false;
+                    newTouchState.isTap = false;
 
                     // Tap counts are preserved from prior touches on the same finger.
                     newTouchState.tapCount = currentTouchState->tapCount;
