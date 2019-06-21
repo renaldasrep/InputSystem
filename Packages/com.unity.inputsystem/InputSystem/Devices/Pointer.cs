@@ -208,7 +208,6 @@ namespace UnityEngine.InputSystem
 
         protected void OnNextUpdate()
         {
-            ////FIXME: this now also changes *both* fixed *and* dynamic
             InputState.Change(delta, Vector2.zero);
         }
 

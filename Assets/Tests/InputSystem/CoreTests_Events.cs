@@ -890,10 +890,7 @@ partial class CoreTests
         public int buttons;
         [InputControl(layout = "Axis")] public float axis2;
 
-        public FourCC format
-        {
-            get { return new FourCC('N', 'S', 'T', 'D'); }
-        }
+        public FourCC format => new FourCC('N', 'S', 'T', 'D');
     }
 
     private struct CustomDeviceState : IInputStateTypeInfo
@@ -902,10 +899,7 @@ partial class CoreTests
 
         public CustomNestedDeviceState nested;
 
-        public FourCC format
-        {
-            get { return new FourCC('C', 'U', 'S', 'T'); }
-        }
+        public FourCC format => new FourCC('C', 'U', 'S', 'T');
     }
 
     [InputControlLayout(stateType = typeof(CustomDeviceState))]
@@ -965,10 +959,7 @@ partial class CoreTests
         public CustomDeviceState baseState;
         public int extra;
 
-        public FourCC format
-        {
-            get { return baseState.format; }
-        }
+        public FourCC format => baseState.format;
     }
 
     // HIDs rely on this behavior as we may only use a subset of a HID's set of

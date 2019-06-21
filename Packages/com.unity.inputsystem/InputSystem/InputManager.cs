@@ -2400,6 +2400,7 @@ namespace UnityEngine.InputSystem
 
                         // Update the state of the device from the event. If the device is an IInputStateCallbackReceiver,
                         // let the device handle the event. If not, we do it ourselves.
+                        var haveChangedStateOtherThanNoise = true;
                         if (deviceIsStateCallbackReceiver)
                         {
                             // NOTE: We leave it to the device to make sure the event has the right format. This allows the
@@ -2417,8 +2418,19 @@ namespace UnityEngine.InputSystem
                                 break;
                             }
 
-                            UpdateState(device, eventPtr, updateType);
+                            haveChangedStateOtherThanNoise = UpdateState(device, eventPtr, updateType);
                         }
+
+                        // Update timestamp on device.
+                        // NOTE: We do this here and not in UpdateState() so that InputState.Change() will *NOT* change timestamps.
+                        //       Only events should.
+                        if (device.m_LastUpdateTimeInternal <= eventPtr.internalTime)
+                            device.m_LastUpdateTimeInternal = eventPtr.internalTime;
+
+                        // Make device current. Again, only do this when receiving events.
+                        if (haveChangedStateOtherThanNoise)
+                            device.MakeCurrent();
+
                         break;
 
                     case TextEvent.Type:
@@ -2667,7 +2679,7 @@ namespace UnityEngine.InputSystem
             m_StateChangeMonitorTimeouts.SetLength(remainingTimeoutCount);
         }
 
-        internal unsafe void UpdateState(InputDevice device, InputEvent* eventPtr, InputUpdateType updateType)
+        internal unsafe bool UpdateState(InputDevice device, InputEvent* eventPtr, InputUpdateType updateType)
         {
             Debug.Assert(eventPtr != null, "Received NULL event ptr");
 
@@ -2707,7 +2719,7 @@ namespace UnityEngine.InputSystem
                 if (offsetInDeviceStateToCopyTo + sizeOfStateToCopy > stateBlockSizeOfDevice)
                 {
                     if (offsetInDeviceStateToCopyTo >= stateBlockSizeOfDevice)
-                        return; // Entire delta state is out of range.
+                        return false; // Entire delta state is out of range.
 
                     sizeOfStateToCopy = stateBlockSizeOfDevice - offsetInDeviceStateToCopyTo;
                 }
@@ -2716,7 +2728,7 @@ namespace UnityEngine.InputSystem
             Debug.Assert(device.m_StateBlock.format == receivedStateFormat, "Received state format does not match format of device");
 
             // Write state.
-            UpdateState(device, updateType, ptrToReceivedState, offsetInDeviceStateToCopyTo,
+            return UpdateState(device, updateType, ptrToReceivedState, offsetInDeviceStateToCopyTo,
                 sizeOfStateToCopy, eventPtr->internalTime, eventPtr);
         }
 
@@ -2736,7 +2748,7 @@ namespace UnityEngine.InputSystem
         /// starting offset in memory.</param>
         /// <param name="eventPtr">Pointer to state event from which the state change was initiated. Null if the state
         /// change is not coming from an event.</param>
-        internal unsafe void UpdateState(InputDevice device, InputUpdateType updateType,
+        internal unsafe bool UpdateState(InputDevice device, InputUpdateType updateType,
             void* statePtr, uint stateOffsetInDevice, uint stateSize, double internalTime, InputEventPtr eventPtr = default)
         {
             var deviceIndex = device.m_DeviceIndex;
@@ -2760,6 +2772,7 @@ namespace UnityEngine.InputSystem
             var deviceStateOffset = device.m_StateBlock.byteOffset + stateOffsetInDevice;
             var deviceStatePtr = deviceBuffer + deviceStateOffset;
 
+            ////REVIEW: Should we do this only for events but not for InputState.Change()?
             // If noise filtering on .current is turned on and the device may have noise,
             // determine if the event carries signal or not.
             var makeDeviceCurrent = true;
@@ -2792,11 +2805,6 @@ namespace UnityEngine.InputSystem
                     stateOffsetInDevice, statePtr, stateSize, flipped);
             }
 
-            if (device.m_LastUpdateTimeInternal <= internalTime)
-                device.m_LastUpdateTimeInternal = internalTime;
-            if (makeDeviceCurrent)
-                device.MakeCurrent();
-
             // Notify listeners.
             for (var i = 0; i < m_DeviceStateChangeListeners.length; ++i)
                 m_DeviceStateChangeListeners[i](device);
@@ -2805,6 +2813,8 @@ namespace UnityEngine.InputSystem
             // monitors fired, let the associated actions know.
             if (haveSignalledMonitors)
                 FireStateChangeNotifications(deviceIndex, internalTime, eventPtr);
+
+            return makeDeviceCurrent;
         }
 
         private static unsafe void WriteStateChange(InputStateBuffers.DoubleBuffers buffers, int deviceIndex,

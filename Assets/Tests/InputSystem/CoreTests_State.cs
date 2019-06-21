@@ -937,6 +937,29 @@ partial class CoreTests
         Assert.That(wasTriggered, Is.True);
     }
 
+    // If a device like Pointer uses InputState.Change() to reset deltas, we don't want that to affect timestamps on the
+    // device as otherwise we may advance time beyond the events still waiting on the queue. However, if Touchscreen uses
+    // IInputStateCallbackReceiver.OnEvent() and InputState.Change() to entirely handle its own state updates, we *do*
+    // want to effect the timestamp and also make the device current.
+    //
+    // So, what we do is not timestamps and .current when using InputState.Change() and leave that event processing in
+    // InputManager.OnUpdate() only.
+    [Test]
+    [Category("State")]
+    public void State_UpdatingStateDirectly_DoesNotModifyTimestampOfDeviceAndDoesNotMakeItCurrent()
+    {
+        var gamepad1 = InputSystem.AddDevice<Gamepad>();
+        var gamepad2 = InputSystem.AddDevice<Gamepad>();
+
+        Assert.That(Gamepad.current, Is.SameAs(gamepad2));
+
+        runtime.currentTime = 123;
+        InputState.Change(gamepad1, new GamepadState {leftTrigger = 0.123f});
+
+        Assert.That(gamepad1.lastUpdateTime, Is.Zero.Within(0.0001));
+        Assert.That(Gamepad.current, Is.SameAs(gamepad2));
+    }
+
     [Test]
     [Category("State")]
     public unsafe void State_CanGetMetrics()
