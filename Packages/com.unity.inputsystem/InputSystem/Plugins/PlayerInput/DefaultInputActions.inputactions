@@ -534,6 +534,18 @@
                 },
                 {
                     "name": "",
+                    "id": "b1e785de-9ca0-4c45-a616-c2e6e101f82d",
+                    "path": "<Touchscreen>/tap",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Click",
+                    "isComposite": false,
+                    "isPartOfComposite": false,
+                    "modifiers": ""
+                },
+                {
+                    "name": "",
                     "id": "38c99815-14ea-4617-8627-164d27641299",
                     "path": "<Mouse>/scroll",
                     "interactions": "",
