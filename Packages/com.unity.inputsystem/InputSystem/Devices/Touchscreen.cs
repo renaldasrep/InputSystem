@@ -37,44 +37,6 @@ namespace UnityEngine.InputSystem.LowLevel
         OrphanedPrimaryTouch = 1 << 6,
     }
 
-    // IMPORTANT: Must match TouchInputState in native code.
-    [StructLayout(LayoutKind.Explicit, Size = kSizeInBytes)]
-    internal struct NativeTouchState
-    {
-        internal const int kSizeInBytes = 36;
-
-        [FieldOffset(0)]
-        public int touchId;
-
-        [FieldOffset(4)]
-        public Vector2 position;
-
-        [FieldOffset(12)]
-        public Vector2 delta;
-
-        [FieldOffset(20)]
-        public float pressure;
-
-        [FieldOffset(24)]
-        public Vector2 radius;
-
-        [FieldOffset(32)]
-        public byte phaseId;
-
-        [FieldOffset(33)]
-        public byte tapCount;
-
-        [FieldOffset(34)]
-        public byte displayIndex;
-
-        [FieldOffset(35)]
-        public byte flags;
-
-        public static FourCC kFormat => new FourCC('T', 'O', 'U', 'C');
-
-        public FourCC format => kFormat;
-    }
-
     ////REVIEW: add timestamp directly to touch?
     /// <summary>
     /// State layout for a single touch.
@@ -86,10 +48,6 @@ namespace UnityEngine.InputSystem.LowLevel
         internal const int kSizeInBytes = 56;
 
         public static FourCC kFormat => new FourCC('T', 'O', 'U', 'C');
-
-        // Duplicates the state from NativeTouchState. We could put all [InputControl] stuff
-        // on NativeInputState and embed it here but then we'd have to expose it through the API
-        // as InputControlLayout will only look for public fields.
 
         [InputControl(layout = "Integer")]
         [FieldOffset(0)]
@@ -129,7 +87,10 @@ namespace UnityEngine.InputSystem.LowLevel
         [FieldOffset(35)]
         public byte flags;
 
-        // Wasting four bytes in the name of alignment here.
+        // Wasting four bytes in the name of alignment here. Need the explicit fields as il2cpp doesn't respect
+        // the explicit field offsets.
+        [FieldOffset(36)]
+        internal int padding;
 
         // NOTE: The following data is NOT sent by native but rather data we add on the managed side to each touch.
         [InputControl(name = "startTime", layout  = "Double")]
@@ -488,6 +449,9 @@ namespace UnityEngine.InputSystem
             var primaryTouchState = (TouchState*)((byte*)statePtr + primaryTouch.stateBlock.byteOffset);
             var touchControlCount = touches.Count;
 
+            // Native does not send a full TouchState as we define it here. We have added some fields
+            // that we store internally. Make sure we don't read invalid memory here and copy only what
+            // we got.
             TouchState newTouchState;
             if (stateEventPtr->stateSizeInBytes == TouchState.kSizeInBytes)
             {
@@ -655,7 +619,7 @@ namespace UnityEngine.InputSystem
                     newTouchState.delta = Vector2.zero;
                     newTouchState.startTime = eventPtr.time;
                     newTouchState.startPosition = newTouchState.position;
-                    
+
                     // Make sure we're not picking up noise sent from native.
                     newTouchState.isPrimaryTouch = false;
                     newTouchState.isOrphanedPrimaryTouch = false;

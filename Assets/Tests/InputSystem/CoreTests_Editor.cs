@@ -1707,6 +1707,8 @@ partial class CoreTests
         Assert.That(tree["map/action"].children[0].displayName, Is.EqualTo("1D Axis"));
     }
 
+    #if UNITY_STANDALONE // CodeDom API not available in most players. We only build and run this in the editor but we're
+                         // still affected by the current platform.
     [Test]
     [Category("Editor")]
     [TestCase("MyControls (2)", "MyNamespace", "", "MyNamespace.MyControls2")]
@@ -1749,6 +1751,8 @@ partial class CoreTests
 
         Assert.That(set1map.ToJson(), Is.EqualTo(map1.ToJson()));
     }
+
+    #endif
 
     // Can take any given registered layout and generate a cross-platform C# struct for it
     // that collects all the control values from both proper and optional controls (based on
